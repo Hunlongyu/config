@@ -1,0 +1,10 @@
+# .clang-format
+
+# 基础设置
+Language: Cpp
+Standard: c++20
+BasedOnStyle: Microsoft
+
+AlignConsecutiveAssignments: true # 对齐连续的等号
+AlignTrailingComments: true # 对齐尾随注释
+NamespaceIndentation: None # 命名空间缩进
