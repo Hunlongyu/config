@@ -1,35 +1,40 @@
-#include <config/config.h>
+#include "config/config.h"
 #include <iostream>
 
-int main()
-{
-    auto cfg    = config::get_store("test", config::save_policy::auto_save, config::Path::appdata);
+int main() {
+    // 示例 1：最简单使用方式，全默认配置
+    config::set("username", "john_doe");
+    std::cout << "Username: " << config::get<std::string>("username") << std::endl;
 
-    std::cout << cfg->get_file_path() << std::endl;
 
-    cfg->set("debug/timeout", 30);
+    // 示例 2：使用 AppData 目录存储配置文件
+    // 创建一个使用 AppData 路径的配置存储，自动保存策略
+    auto appdata_store = config::get_store("appdata_config", config::save_policy::auto_save, config::Path::appdata);
+    // 设置键值对：用户名和分数
+    appdata_store->set("username", "john_doe");
+    appdata_store->set("score", 100);
+    // 打印配置文件路径和存储的值
+    std::cout << "AppData: " << appdata_store->get_file_path().string() << std::endl;
+    std::cout << "username: " << appdata_store->get<std::string>("username") 
+              << ", score: " << appdata_store->get<int>("score") << std::endl;
 
-    cfg->set("/user/passworld", "123", config::Obfuscate::base64);
-    std::cout << cfg->get<std::string>("/user/passworld") << std::endl;
+    // 示例 3：使用当前目录存储配置文件
+    // 创建一个使用当前目录的配置存储，自动保存策略
+    auto current_store = config::get_store("current_config", config::save_policy::auto_save, config::Path::current_dir);
+    // 设置主题配置
+    current_store->set("theme", "dark");
+    // 打印配置文件路径和主题值
+    std::cout << "current_config: " << current_store->get_file_path().string() << std::endl;
+    std::cout << "theme: " << current_store->get<std::string>("theme") << std::endl;
 
-    cfg->set_obfuscated("/user/age", 18);
-    std::cout << cfg->get<int>("/user/age") << std::endl;
+    // 示例 4：使用自动检测路径策略
+    // 创建一个自动检测路径的配置存储（优先 AppData，无权限则回退到当前目录）
+    auto auto_store = config::get_store("auto_config", config::save_policy::auto_save, config::Path::auto_detect);
+    // 设置语言配置
+    auto_store->set("language", "en");
+    // 打印配置文件路径和语言值
+    std::cout << "auto_config: " << auto_store->get_file_path().string() << std::endl;
+    std::cout << "language: " << auto_store->get<std::string>("language") << std::endl;
 
-    cfg->set_obfuscated("/user/phone", "18365289000");
-    std::cout << cfg->get<std::string>("/user/phone") << std::endl;
-
-    auto id = cfg->connect("debug/timeout", [](const config::json &old_val, const config::json &new_val) {
-        std::cout << "old_val: " << old_val.dump() << " new_val: " << new_val.dump() << std::endl;
-    });
-
-    cfg->set("debug/timeout", 60);
-
-    cfg->disconnect(id);
-
-    std::cout << cfg->to_string() << std::endl;
-
-    cfg->set("debug/timeout", 90);
-
-    std::cout << cfg->to_string() << std::endl;
     return 0;
 }

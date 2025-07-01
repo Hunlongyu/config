@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -16,6 +15,7 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#include <windows.h>
 
 namespace config
 {
@@ -107,7 +107,7 @@ class obfuscator
             valb += 6;
             if (valb >= 0)
             {
-                decoded.push_back(char((val >> valb) & 0xFF));
+                decoded.push_back(static_cast<char>((val >> valb) & 0xFF));
                 valb -= 8;
             }
         }
@@ -192,24 +192,39 @@ class obfuscator
 // 路径管理器 - 支持多种路径策略
 class path_manager
 {
-  private:
-    static std::string app_name_;
-
   public:
-    // 设置程序名称
-    static void set_app_name(const std::string &name)
-    {
-        app_name_ = name;
-    }
-
-    // 获取程序名称
+    // 自动获取程序名称（Windows平台）
     static std::string get_app_name()
     {
-        if (app_name_.empty())
+#ifdef _WIN32
+        static std::string cached_app_name;
+
+        // 如果已经缓存了程序名，直接返回
+        if (!cached_app_name.empty())
         {
-            return "example"; // 默认程序名
+            return cached_app_name;
         }
-        return app_name_;
+
+        // 获取程序的完整路径
+        char module_path[MAX_PATH];
+        DWORD result = GetModuleFileNameA(nullptr, module_path, MAX_PATH);
+
+        if (result > 0 && result < MAX_PATH)
+        {
+            // 转换为filesystem::path来处理路径
+            fs::path exe_path(module_path);
+
+            // 获取文件名（不包括扩展名）
+            std::string app_name = exe_path.stem().string();
+
+            // 缓存结果
+            cached_app_name = app_name;
+            return app_name;
+        }
+#endif
+
+        // 如果获取失败，返回默认名称
+        return "config_app";
     }
 
     static fs::path get_appdata_directory()
@@ -233,12 +248,12 @@ class path_manager
         }
 
         // 最终备用方案
-        return fs::current_path() / get_app_name();
+        return fs::current_path() / "config";
     }
 
     static fs::path get_current_dir_config()
     {
-        return fs::current_path() / get_app_name();
+        return fs::current_path() / "config";
     }
 
     static fs::path get_config_directory(Path policy = Path::auto_detect)
@@ -295,9 +310,6 @@ class path_manager
         return get_config_directory(policy) / (store_name + ".json");
     }
 };
-
-// 静态成员定义
-std::string path_manager::app_name_;
 
 // 监听器管理
 using listener_id       = uint64_t;
@@ -964,7 +976,7 @@ class config_store
     {
         std::shared_lock lock(mutex_);
         std::vector<std::string> keys;
-        for (const auto &[key, policy] : obfuscate_map_)
+        for (const auto &key : obfuscate_map_ | std::views::keys)
         {
             keys.push_back(key);
         }
@@ -1103,12 +1115,6 @@ class config
     {
         get_default()->remove(key);
     }
-
-    // 设置程序名称
-    static void set_app_name(const std::string &name)
-    {
-        path_manager::set_app_name(name);
-    }
 };
 
 // 全局便捷函数
@@ -1142,11 +1148,4 @@ inline std::string dump(int indent = 4)
 {
     return config::dump(indent);
 }
-
-// 设置程序名称的便捷函数
-inline void set_app_name(const std::string &name)
-{
-    config::set_app_name(name);
-}
-
 } // namespace config
