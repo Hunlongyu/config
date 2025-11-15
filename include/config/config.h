@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -11,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <ostream>
 #include <ranges>
 #include <shared_mutex>
 #include <string>
@@ -70,9 +73,8 @@ enum class Obfuscate
 };
 
 // 混淆工具类
-class obfuscator
+class obfuscation_utils
 {
-  private:
     static constexpr uint8_t XOR_KEY  = 0xAB;
     static constexpr int SHIFT_OFFSET = 7;
 
@@ -84,19 +86,19 @@ class obfuscator
     static std::string base64_encode(const std::string &input)
     {
         std::string encoded;
-        int val = 0, valb = -6;
-        for (unsigned char c : input)
+        int val = 0, bit_count = -6;
+        for (const unsigned char c : input)
         {
             val = (val << 8) + c;
-            valb += 8;
-            while (valb >= 0)
+            bit_count += 8;
+            while (bit_count >= 0)
             {
-                encoded.push_back(base64_chars[(val >> valb) & 0x3F]);
-                valb -= 6;
+                encoded.push_back(base64_chars[(val >> bit_count) & 0x3F]);
+                bit_count -= 6;
             }
         }
-        if (valb > -6)
-            encoded.push_back(base64_chars[((val << 8) >> (valb + 8)) & 0x3F]);
+        if (bit_count > -6)
+            encoded.push_back(base64_chars[((val << 8) >> (bit_count + 8)) & 0x3F]);
         while (encoded.size() % 4)
             encoded.push_back('=');
         return encoded;
@@ -110,8 +112,8 @@ class obfuscator
         for (int i = 0; i < 64; i++)
             T[base64_chars[i]] = i;
 
-        int val = 0, valb = -8;
-        for (unsigned char c : input)
+        int val = 0, bit_count = -8;
+        for (const unsigned char c : input)
         {
             if (std::isspace(c))
                 continue;
@@ -120,11 +122,11 @@ class obfuscator
             if (c < 128 && T[c] != -1)
             {
                 val = (val << 6) + T[c];
-                valb += 6;
-                if (valb >= 0)
+                bit_count += 6;
+                if (bit_count >= 0)
                 {
-                    decoded.push_back(static_cast<char>((val >> valb) & 0xFF));
-                    valb -= 8;
+                    decoded.push_back(static_cast<char>((val >> bit_count) & 0xFF));
+                    bit_count -= 8;
                 }
             }
         }
@@ -214,10 +216,10 @@ class path_manager
     {
 #if defined(_WIN32)
         char module_path[MAX_PATH]{};
-        DWORD r = GetModuleFileNameA(nullptr, module_path, MAX_PATH);
+        const DWORD r = GetModuleFileNameA(nullptr, module_path, MAX_PATH);
         if (r > 0 && r < MAX_PATH)
         {
-            fs::path p(module_path);
+            const fs::path p(module_path);
             return p.stem().string();
         }
 #elif defined(__APPLE__)
@@ -339,7 +341,7 @@ class path_manager
 
     static fs::path resolve_config_file(const std::string &store_name, const fs::path &base_dir)
     {
-        std::string norm = normalize_store_name(store_name);
+        const std::string norm = normalize_store_name(store_name);
         fs::path rel(norm);
         if (rel.is_absolute())
         {
@@ -353,8 +355,8 @@ class path_manager
                 continue;
             filtered /= part;
         }
-        fs::path dir  = base_dir / filtered.parent_path();
-        fs::path file = dir / (filtered.filename().string() + ".json");
+        const fs::path dir = base_dir / filtered.parent_path();
+        fs::path file      = dir / (filtered.filename().string() + ".json");
         return file;
     }
 };
@@ -365,7 +367,6 @@ using listener_callback = std::function<void(const json &, const json &)>;
 
 class listener_manager
 {
-  private:
     std::unordered_map<listener_id, listener_callback> listeners_;
     std::unordered_map<std::string, std::vector<listener_id>> path_listeners_;
     std::atomic<listener_id> next_id_{1};
@@ -375,7 +376,7 @@ class listener_manager
     listener_id add_listener(const std::string &path, listener_callback callback)
     {
         std::unique_lock lock(mutex_);
-        auto id        = next_id_++;
+        const auto id  = next_id_++;
         listeners_[id] = std::move(callback);
         path_listeners_[path].push_back(id);
         return id;
@@ -399,7 +400,7 @@ class listener_manager
     void notify_listeners(const std::string &path, const json &old_value, const json &new_value)
     {
         std::shared_lock lock(mutex_);
-        auto it = path_listeners_.find(path);
+        const auto it = path_listeners_.find(path);
         if (it != path_listeners_.end())
         {
             for (auto id : it->second)
@@ -431,7 +432,6 @@ enum class SavePolicy
 // 配置存储类 - 支持JSON Pointer、路径策略和选择性值混淆
 class config_store
 {
-  private:
     json data_;
     fs::path file_path_;
     Path path_policy_{Path::AutoDetect};
@@ -523,14 +523,14 @@ class config_store
                     if (!value.is_null() && value.is_string())
                     {
                         set_value_by_pointer_in_json(result, key,
-                                                     obfuscator::obfuscate(value.get<std::string>(), policy));
+                                                     obfuscation_utils::obfuscate(value.get<std::string>(), policy));
                     }
                 }
                 else
                 {
                     if (result.contains(key) && result[key].is_string())
                     {
-                        result[key] = obfuscator::obfuscate(result[key].get<std::string>(), policy);
+                        result[key] = obfuscation_utils::obfuscate(result[key].get<std::string>(), policy);
                     }
                 }
             }
@@ -571,8 +571,8 @@ class config_store
                     {
                         try
                         {
-                            set_value_by_pointer_in_json(result, key,
-                                                         obfuscator::deobfuscate(value.get<std::string>(), policy));
+                            set_value_by_pointer_in_json(
+                                result, key, obfuscation_utils::deobfuscate(value.get<std::string>(), policy));
                         }
                         catch (...)
                         {
@@ -586,7 +586,7 @@ class config_store
                     {
                         try
                         {
-                            result[key] = obfuscator::deobfuscate(result[key].get<std::string>(), policy);
+                            result[key] = obfuscation_utils::deobfuscate(result[key].get<std::string>(), policy);
                         }
                         catch (...)
                         {
@@ -674,7 +674,7 @@ class config_store
             }
 
             // 混淆指定字段后保存
-            json obfuscated_data = obfuscate_json_for_save(data_);
+            const json obfuscated_data = obfuscate_json_for_save(data_);
             file << obfuscated_data.dump(4);
             file.flush();
             dirty_flag_ = false;
@@ -740,8 +740,8 @@ class config_store
     {
         if (path_policy_ == Path::AutoDetect)
         {
-            auto appdata = path_manager::resolve_config_file(name, path_manager::get_appdata_directory());
-            auto current = path_manager::resolve_config_file(name, path_manager::get_current_dir_config());
+            const auto appdata = path_manager::resolve_config_file(name, path_manager::get_appdata_directory());
+            const auto current = path_manager::resolve_config_file(name, path_manager::get_current_dir_config());
             if (fs::exists(appdata))
                 file_path_ = appdata;
             else if (fs::exists(current))
@@ -930,9 +930,9 @@ class config_store
                     // JSON Pointer删除需要特殊处理
                     try
                     {
-                        auto ptr        = nlohmann::json::json_pointer(key);
-                        auto parent_ptr = ptr.parent_pointer();
-                        auto last_key   = ptr.back();
+                        const auto ptr        = nlohmann::json::json_pointer(key);
+                        const auto parent_ptr = ptr.parent_pointer();
+                        const auto last_key   = ptr.back();
 
                         if (parent_ptr.empty())
                         {
@@ -949,7 +949,7 @@ class config_store
                             {
                                 try
                                 {
-                                    size_t idx = static_cast<size_t>(std::stoll(last_key));
+                                    const size_t idx = static_cast<size_t>(std::stoll(last_key));
                                     if (idx < parent.size())
                                     {
                                         parent.erase(parent.begin() + static_cast<std::ptrdiff_t>(idx));
@@ -1008,8 +1008,8 @@ class config_store
         std::unique_lock lock(mutex_);
         if (path_policy_ == Path::AutoDetect)
         {
-            auto appdata = path_manager::resolve_config_file(store_name_, path_manager::get_appdata_directory());
-            auto current = path_manager::resolve_config_file(store_name_, path_manager::get_current_dir_config());
+            const auto appdata = path_manager::resolve_config_file(store_name_, path_manager::get_appdata_directory());
+            const auto current = path_manager::resolve_config_file(store_name_, path_manager::get_current_dir_config());
             if (fs::exists(appdata))
                 file_path_ = appdata;
             else if (fs::exists(current))
@@ -1065,7 +1065,7 @@ class config_store
     Obfuscate get_obfuscate_policy(const std::string &key) const
     {
         std::shared_lock lock(mutex_);
-        auto it = obfuscate_map_.find(key);
+        const auto it = obfuscate_map_.find(key);
         return (it != obfuscate_map_.end()) ? it->second : Obfuscate::None;
     }
 
@@ -1120,7 +1120,6 @@ class config_store
 // 全局注册表
 class registry
 {
-  private:
     inline static std::unordered_map<std::string, std::shared_ptr<config_store>> stores_;
     inline static std::shared_mutex mutex_;
 
@@ -1177,7 +1176,6 @@ inline std::shared_ptr<config_store> get_store(const std::string &name, SavePoli
 // 全局默认配置
 class config
 {
-  private:
     static std::shared_ptr<config_store> get_default()
     {
         static auto default_store = registry::get_store("default");
@@ -1206,7 +1204,7 @@ class config
     }
 
     template <typename T>
-    static void set_obfuscated(const std::string &key, const T &value, Obfuscate obf_policy = Obfuscate::combined)
+    static void set_obfuscated(const std::string &key, const T &value, Obfuscate obf_policy = Obfuscate::Combined)
     {
         get_default()->set_obfuscated(key, value, obf_policy);
     }
@@ -1233,28 +1231,28 @@ class config
 };
 
 // 全局便捷函数
-template <typename T> inline T get(const std::string &key)
+template <typename T> T get(const std::string &key)
 {
     return config::get<T>(key);
 }
 
-template <typename T> inline T get_or(const std::string &key, const T &default_value)
+template <typename T> T get_or(const std::string &key, const T &default_value)
 {
     return config::get_or(key, default_value);
 }
 
-template <typename T> inline void set(const std::string &key, const T &value)
+template <typename T> void set(const std::string &key, const T &value)
 {
     config::set(key, value);
 }
 
-template <typename T> inline void set(const std::string &key, const T &value, Obfuscate obf_policy)
+template <typename T> void set(const std::string &key, const T &value, Obfuscate obf_policy)
 {
     config::set(key, value, obf_policy);
 }
 
 template <typename T>
-inline void set_obfuscated(const std::string &key, const T &value, Obfuscate obf_policy = Obfuscate::combined)
+void set_obfuscated(const std::string &key, const T &value, Obfuscate obf_policy = Obfuscate::Combined)
 {
     config::set_obfuscated(key, value, obf_policy);
 }
