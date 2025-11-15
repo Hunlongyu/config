@@ -440,6 +440,12 @@ enum class SavePolicy
     TimedSave   // 定时保存
 };
 
+enum class SaveFormat
+{
+    Formatted,
+    Compressed
+};
+
 // 配置存储类 - 支持JSON Pointer、路径策略和选择性值混淆
 class config_store
 {
@@ -456,6 +462,7 @@ class config_store
     std::atomic<bool> stop_flag_{false};
     std::condition_variable cv_;
     std::mutex cv_mutex_;
+    SaveFormat save_format_{SaveFormat::Formatted};
 
     // 混淆信息映射：键 -> 混淆策略
     std::unordered_map<std::string, Obfuscate> obfuscate_map_;
@@ -686,7 +693,14 @@ class config_store
 
             // 混淆指定字段后保存
             const json obfuscated_data = obfuscate_json_for_save(data_);
-            file << obfuscated_data.dump(4);
+            if (save_format_ == SaveFormat::Compressed)
+            {
+                file << obfuscated_data.dump();
+            }
+            else
+            {
+                file << obfuscated_data.dump(4);
+            }
             file.flush();
             dirty_flag_ = false;
         }
@@ -1008,6 +1022,22 @@ class config_store
         save_to_file_internal();
     }
 
+    void set_save_format(SaveFormat format)
+    {
+        save_format_ = format;
+    }
+
+    SaveFormat get_save_format() const
+    {
+        return save_format_;
+    }
+
+    void save(SaveFormat format)
+    {
+        set_save_format(format);
+        save_to_file_internal();
+    }
+
     void set_save_interval(std::chrono::milliseconds interval)
     {
         save_interval_ = interval;
@@ -1228,6 +1258,21 @@ class config
     static void save()
     {
         get_default()->save();
+    }
+
+    static void set_save_format(SaveFormat format)
+    {
+        get_default()->set_save_format(format);
+    }
+
+    static SaveFormat get_save_format()
+    {
+        return get_default()->get_save_format();
+    }
+
+    static void save(SaveFormat format)
+    {
+        get_default()->save(format);
     }
 
     static bool contains(const std::string &key)

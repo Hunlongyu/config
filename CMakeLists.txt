@@ -11,7 +11,7 @@ if(MSVC)
   add_compile_options(/utf-8)
 endif()
 
-option(CONFIG_FETCH_JSON "Automatically fetch nlohmann_json if not found" OFF)
+option(CONFIG_FETCH_JSON "Automatically fetch nlohmann_json if not found" ON)
 
 find_package(nlohmann_json QUIET)
 if(NOT nlohmann_json_FOUND AND CONFIG_FETCH_JSON)

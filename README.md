@@ -1,176 +1,112 @@
 # Config Store
 
-一个现代化的 C++ 配置管理库，支持 JSON 格式、自动保存、数据混淆和变更监听。
+一个现代化的 C++ 配置管理库，支持 JSON、自动/定时保存、数据混淆、路径策略与变更监听。
 
 ## 特性
 
-- 🔧 **JSON 格式配置** - 使用 nlohmann/json 库，支持 JSON Pointer 语法
-- 💾 **多种保存策略** - 自动保存、手动保存、批量保存、定时保存
-- 🛡️ **数据混淆** - 支持多种混淆策略保护敏感配置
-- 📂 **智能路径管理** - 自动选择最佳配置目录（AppData/当前目录）
-- 🔔 **变更监听** - 支持配置变更回调通知
-- 🧵 **线程安全** - 使用读写锁保证并发安全
-- 📦 **Header-Only** - 仅头文件库（CMake INTERFACE 目标），易于集成
+- JSON 配置，兼容 JSON Pointer
+- 保存策略：自动、手动、批量、定时
+- 保存格式：格式化与压缩输出
+- 数据混淆：Base64、XOR、字符位移、组合
+- 路径策略：当前目录与 AppData 自动选择
+- 变更监听与线程安全
+- Header-Only，易集成（CMake INTERFACE）
 
-## 安装
+## 安装与依赖
 
-### 使用 CMake FetchContent（推荐）
+- 依赖：C++20、nlohmann/json、Windows/Linux/macOS
+- CMake FetchContent（推荐）：
 
 ```cmake
 include(FetchContent)
-
-FetchContent_Declare(
-  config
-  GIT_REPOSITORY https://github.com/Hunlongyu/config.git
-  GIT_TAG        main
-)
-
+FetchContent_Declare(config GIT_REPOSITORY https://github.com/Hunlongyu/config.git GIT_TAG main)
 FetchContent_MakeAvailable(config)
-
 target_link_libraries(your_target PRIVATE config)
 ```
 
-### 手动安装
-
-```bash
-git clone https://github.com/Hunlongyu/config.git
-# 将 config.h 复制到你的项目中
-```
-
-## 依赖
-
-- C++20 或更高版本
-- nlohmann/json
-- Windows/Linux/macOS（跨平台路径策略）
+- 手动安装：复制 `include/config/config.h` 到项目并在编译选项中加入头文件路径。
 
 ## 快速开始
-
-### 基本用法
 
 ```cpp
 #include <config/config.h>
 
-// 使用全局配置
-config::set("username", "张三");
+config::set("username", "ZhangSan");
 config::set("port", 8080);
-config::set("debug", true);
 
-// 获取配置
 auto username = config::get<std::string>("username");
-auto port = config::get_or<int>("port", 3000);  // 默认值
+auto port = config::get_or<int>("port", 3000);
 ```
 
-### 使用命名配置存储
+### 多存储与 JSON Pointer
 
 ```cpp
-// 创建多个独立的配置存储
-auto db_config = config::get_store("database");
-db_config->set("host", "localhost");
-db_config->set("port", 5432);
-db_config->set("password", "secret123");
-
-auto server_config = config::get_store("server");
-server_config->set("bind_address", "0.0.0.0");
-server_config->set("max_connections", 1000);
-
-auto ui_config = config::get_store("ui_settings");
-ui_config->set("theme", "dark");
-ui_config->set("language", "zh-CN");
-
-// 每个存储都有独立的配置文件
-// database.json, server.json, ui_settings.json
-```
-
-### JSON Pointer 支持
-
-```cpp
-// 使用 JSON Pointer 语法访问嵌套配置
-config::set("/server/host", "localhost");
+auto db = config::get_store("database");
+db->set("host", "localhost");
 config::set("/server/port", 8080);
-config::set("/database/connections/0/host", "db1.example.com");
-
 auto host = config::get<std::string>("/server/host");
 ```
 
-### 数据混淆
+## 保存
 
-```cpp
-// 设置敏感数据时使用混淆
-config::set_obfuscated("api_key", "sk-1234567890abcdef");
-config::set("password", "secret123", config::Obfuscate::Combined);
-
-// 获取时自动解混淆
-auto api_key = config::get<std::string>("api_key");
-```
-
-### 变更监听
-
-```cpp
-auto store = config::get_store("app");
-
-// 监听配置变更
-auto listener_id = store->connect("username", [](const auto& old_val, const auto& new_val) {
-    std::cout << "用户名从 " << old_val << " 更改为 " << new_val << std::endl;
-});
-
-// 取消监听
-store->disconnect(listener_id);
-```
-
-## 保存策略
+### 保存策略
 
 ```cpp
 using namespace config;
+auto s1 = get_store("app", SavePolicy::AutoSave);
+auto s2 = get_store("cache", SavePolicy::ManualSave); s2->save();
+auto s3 = get_store("logs", SavePolicy::TimedSave);
+```
 
-// 自动保存（默认）
-auto config1 = get_store("app", SavePolicy::AutoSave);
+### 保存格式
 
-// 手动保存
-auto config2 = get_store("cache", SavePolicy::ManualSave);
-config2->set("key", "value");
-config2->save();  // 手动保存
-
-// 定时保存
-auto config3 = get_store("logs", SavePolicy::TimedSave);
+```cpp
+using namespace config;
+config::set_save_format(SaveFormat::Compressed);
+config::save();
+config::save(SaveFormat::Formatted);
+auto s = get_store("artifact"); s->set_save_format(SaveFormat::Compressed); s->save();
 ```
 
 ## 路径策略
 
 ```cpp
 using namespace config;
-
-// 自动检测路径（优先 AppData）
-auto config1 = get_store("app", SavePolicy::AutoSave, Path::AutoDetect);
-
-// 强制使用 AppData 目录
-auto config2 = get_store("user", SavePolicy::AutoSave, Path::AppData);
-
-// 使用当前目录
-auto config3 = get_store("local", SavePolicy::AutoSave, Path::CurrentDir);
+auto s1 = get_store("app", SavePolicy::AutoSave, Path::AutoDetect);
+auto s2 = get_store("user", SavePolicy::AutoSave, Path::AppData);
+auto s3 = get_store("local", SavePolicy::AutoSave, Path::CurrentDir);
 ```
 
-## 混淆策略
+## 数据混淆
 
-- `Obfuscate::None` - 无混淆
-- `Obfuscate::Base64` - Base64 编码
-- `Obfuscate::XorCipher` - XOR 异或混淆
-- `Obfuscate::CharShift` - 字符位移混淆
-- `Obfuscate::Combined` - 组合混淆（推荐）
+```cpp
+using namespace config;
+config::set_obfuscated("api_key", "sk-xxx");
+config::set("password", "secret", Obfuscate::Combined);
+```
 
-## 更多示例
+## 变更监听
 
-查看 `examples/` 目录获取完整的使用示例。
+```cpp
+auto store = config::get_store("app");
+auto id = store->connect("username", [](const auto& old_val, const auto& new_val){
+    std::cout << old_val << " -> " << new_val << std::endl;
+});
+store->disconnect(id);
+```
 
-## 许可证
+## 示例与构建
 
-MIT License
+- 打开 `examples/`，启用 `BUILD_CONFIG_EXAMPLES`（默认 ON）即可构建所有示例。
+- 可执行文件输出在 `out/build/<config>/bin/`。
 
-## 贡献
+## 许可证与贡献
 
-欢迎提交 Issue 和 Pull Request！
+- 许可证：MIT
+- 欢迎提交 Issue 和 Pull Request
 
 ## 注意事项
 
-- 提供跨平台支持（Windows/Linux/macOS）
-- 需要 C++20 编译器支持
-- 混淆功能仅为基础保护，不适用于高安全性要求的场景
+- 跨平台支持（Windows/Linux/macOS）
+- 需要 C++20 编译器
+- 混淆为基础保护，不适用于高安全性场景
