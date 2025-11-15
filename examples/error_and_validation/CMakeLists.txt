@@ -1,0 +1,3 @@
+add_executable(error_and_validation main.cpp)
+target_link_libraries(error_and_validation PRIVATE config)
+set_target_properties(error_and_validation PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

@@ -1,0 +1,3 @@
+add_executable(change_listeners main.cpp)
+target_link_libraries(change_listeners PRIVATE config)
+set_target_properties(change_listeners PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

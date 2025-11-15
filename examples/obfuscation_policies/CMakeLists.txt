@@ -1,0 +1,3 @@
+add_executable(obfuscation_policies main.cpp)
+target_link_libraries(obfuscation_policies PRIVATE config)
+set_target_properties(obfuscation_policies PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

@@ -5,14 +5,13 @@ project(config VERSION 0.0.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 if(MSVC)
   add_compile_options(/W4)
   add_compile_options(/utf-8)
-endif()
-
-if(WIN32)
-  link_libraries(version.lib)
+  set(CMAKE_MSVC_SCAN_DEPENDENCIES OFF)
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif()
 
 include(FetchContent)

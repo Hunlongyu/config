@@ -1,0 +1,3 @@
+add_executable(multiple_stores_registry main.cpp)
+target_link_libraries(multiple_stores_registry PRIVATE config)
+set_target_properties(multiple_stores_registry PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

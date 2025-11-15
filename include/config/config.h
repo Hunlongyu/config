@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -10,12 +11,23 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <ranges>
 #include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#if defined(_WIN32)
 #include <windows.h>
+#endif
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#include <unistd.h>
+#endif
+#if defined(__linux__)
+#include <limits.h>
+#include <unistd.h>
+#endif
 
 namespace config
 {
@@ -42,19 +54,19 @@ class config_exception : public std::exception
 // 路径策略枚举
 enum class Path
 {
-    current_dir, // 当前目录/程序名/
-    appdata,     // 系统AppData目录/程序名/
-    auto_detect  // 自动检测（优先AppData，fallback到当前目录）
+    CurrentDir, // 当前目录/程序名/
+    AppData,    // 系统AppData目录/程序名/
+    AutoDetect  // 自动检测（优先AppData，fallback到当前目录）
 };
 
 // 混淆策略枚举
 enum class Obfuscate
 {
-    none,       // 不混淆
-    base64,     // Base64编码
-    xor_cipher, // XOR异或混淆
-    char_shift, // 字符位移混淆
-    combined    // 组合混淆（Base64 + XOR + 位移）
+    None,      // 不混淆
+    Base64,    // Base64编码
+    XorCipher, // XOR异或混淆
+    CharShift, // 字符位移混淆
+    Combined   // 组合混淆（Base64 + XOR + 位移）
 };
 
 // 混淆工具类
@@ -101,14 +113,19 @@ class obfuscator
         int val = 0, valb = -8;
         for (unsigned char c : input)
         {
-            if (T[c] == -1)
+            if (std::isspace(c))
+                continue;
+            if (c == '=')
                 break;
-            val = (val << 6) + T[c];
-            valb += 6;
-            if (valb >= 0)
+            if (c < 128 && T[c] != -1)
             {
-                decoded.push_back(static_cast<char>((val >> valb) & 0xFF));
-                valb -= 8;
+                val = (val << 6) + T[c];
+                valb += 6;
+                if (valb >= 0)
+                {
+                    decoded.push_back(static_cast<char>((val >> valb) & 0xFF));
+                    valb -= 8;
+                }
             }
         }
         return decoded;
@@ -153,15 +170,15 @@ class obfuscator
     {
         switch (policy)
         {
-        case Obfuscate::none:
+        case Obfuscate::None:
             return input;
-        case Obfuscate::base64:
+        case Obfuscate::Base64:
             return base64_encode(input);
-        case Obfuscate::xor_cipher:
+        case Obfuscate::XorCipher:
             return base64_encode(xor_obfuscate(input));
-        case Obfuscate::char_shift:
+        case Obfuscate::CharShift:
             return base64_encode(char_shift_obfuscate(input));
-        case Obfuscate::combined:
+        case Obfuscate::Combined:
             return base64_encode(xor_obfuscate(char_shift_obfuscate(input)));
         default:
             return input;
@@ -173,15 +190,15 @@ class obfuscator
     {
         switch (policy)
         {
-        case Obfuscate::none:
+        case Obfuscate::None:
             return input;
-        case Obfuscate::base64:
+        case Obfuscate::Base64:
             return base64_decode(input);
-        case Obfuscate::xor_cipher:
+        case Obfuscate::XorCipher:
             return xor_obfuscate(base64_decode(input));
-        case Obfuscate::char_shift:
+        case Obfuscate::CharShift:
             return char_shift_deobfuscate(base64_decode(input));
-        case Obfuscate::combined:
+        case Obfuscate::Combined:
             return char_shift_deobfuscate(xor_obfuscate(base64_decode(input)));
         default:
             return input;
@@ -189,125 +206,156 @@ class obfuscator
     }
 };
 
-// 路径管理器 - 支持多种路径策略
+// 路径管理器 - 支持多种路径策略（使用存储名作为目录名）
 class path_manager
 {
   public:
-    // 自动获取程序名称（Windows平台）
-    static std::string get_app_name()
+    static std::string get_program_name()
     {
-#ifdef _WIN32
-        static std::string cached_app_name;
-
-        // 如果已经缓存了程序名，直接返回
-        if (!cached_app_name.empty())
+#if defined(_WIN32)
+        char module_path[MAX_PATH]{};
+        DWORD r = GetModuleFileNameA(nullptr, module_path, MAX_PATH);
+        if (r > 0 && r < MAX_PATH)
         {
-            return cached_app_name;
+            fs::path p(module_path);
+            return p.stem().string();
         }
-
-        // 获取程序的完整路径
-        char module_path[MAX_PATH];
-        DWORD result = GetModuleFileNameA(nullptr, module_path, MAX_PATH);
-
-        if (result > 0 && result < MAX_PATH)
+#elif defined(__APPLE__)
+        char buf[4096];
+        uint32_t size = sizeof(buf);
+        if (_NSGetExecutablePath(buf, &size) == 0)
         {
-            // 转换为filesystem::path来处理路径
-            fs::path exe_path(module_path);
-
-            // 获取文件名（不包括扩展名）
-            std::string app_name = exe_path.stem().string();
-
-            // 缓存结果
-            cached_app_name = app_name;
-            return app_name;
+            fs::path p(buf);
+            return p.stem().string();
+        }
+#elif defined(__linux__)
+        char buf[PATH_MAX];
+        ssize_t len = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+        if (len > 0)
+        {
+            buf[len] = '\0';
+            fs::path p(buf);
+            return p.stem().string();
         }
 #endif
-
-        // 如果获取失败，返回默认名称
-        return "config_app";
+        return std::string("config_app");
     }
-
     static fs::path get_appdata_directory()
     {
-        // Windows: 获取 %LOCALAPPDATA% 路径
-        char *appdata_path = nullptr;
-        size_t len         = 0;
-        if (_dupenv_s(&appdata_path, &len, "LOCALAPPDATA") == 0 && appdata_path != nullptr)
+        const char *p = nullptr;
+#if defined(_WIN32)
+        p = std::getenv("LOCALAPPDATA");
+        if (p && *p)
         {
-            fs::path result = fs::path(appdata_path) / get_app_name();
-            free(appdata_path);
-            return result;
+            return fs::path(p) / get_program_name();
         }
-
-        // 备用方案：使用 %USERPROFILE%\AppData\Local
-        if (_dupenv_s(&appdata_path, &len, "USERPROFILE") == 0 && appdata_path != nullptr)
+        const char *user = std::getenv("USERPROFILE");
+        if (user && *user)
         {
-            fs::path result = fs::path(appdata_path) / "AppData" / "Local" / get_app_name();
-            free(appdata_path);
-            return result;
+            return fs::path(user) / "AppData" / "Local" / get_program_name();
         }
-
-        // 最终备用方案
-        return fs::current_path() / "config";
+        return fs::current_path();
+#elif defined(__APPLE__)
+        const char *home = std::getenv("HOME");
+        if (home && *home)
+        {
+            return fs::path(home) / "Library" / "Application Support" / get_program_name();
+        }
+        return fs::current_path();
+#else
+        const char *xdg = std::getenv("XDG_CONFIG_HOME");
+        if (xdg && *xdg)
+        {
+            return fs::path(xdg) / get_program_name();
+        }
+        const char *home = std::getenv("HOME");
+        if (home && *home)
+        {
+            return fs::path(home) / ".config" / get_program_name();
+        }
+        return fs::current_path();
+#endif
     }
 
     static fs::path get_current_dir_config()
     {
-        return fs::current_path() / "config";
+        return fs::current_path();
     }
 
-    static fs::path get_config_directory(Path policy = Path::auto_detect)
+    static fs::path get_config_directory(Path policy = Path::AutoDetect)
     {
         switch (policy)
         {
-        case Path::current_dir:
+        case Path::CurrentDir:
             return get_current_dir_config();
 
-        case Path::appdata:
+        case Path::AppData:
             return get_appdata_directory();
 
-        case Path::auto_detect:
+        case Path::AutoDetect:
         default: {
-            // 优先尝试AppData目录
             auto appdata_config = get_appdata_directory();
             try
             {
                 fs::create_directories(appdata_config);
-
-                // 测试写权限
-                auto test_file = appdata_config / "test_write.tmp";
-                std::ofstream test(test_file);
-                if (test.is_open())
-                {
-                    test.close();
-                    fs::remove(test_file);
-                    return appdata_config;
-                }
+                return appdata_config;
             }
             catch (...)
             {
             }
-
-            // fallback到当前目录
+            auto current_config = get_current_dir_config();
             try
             {
-                auto current_config = get_current_dir_config();
                 fs::create_directories(current_config);
                 return current_config;
             }
             catch (...)
             {
             }
-
-            // 最终fallback到当前目录
             return fs::current_path();
         }
         }
     }
 
-    static fs::path get_config_path(const std::string &store_name, Path policy = Path::auto_detect)
+    static fs::path get_config_path(const std::string &store_name, Path policy = Path::AutoDetect)
     {
-        return get_config_directory(policy) / (store_name + ".json");
+        return resolve_config_file(store_name, get_config_directory(policy));
+    }
+
+    static std::string normalize_store_name(const std::string &name)
+    {
+#if defined(_WIN32)
+        return name;
+#else
+        std::string n = name;
+        for (auto &ch : n)
+        {
+            if (ch == '\\')
+                ch = '/';
+        }
+        return n;
+#endif
+    }
+
+    static fs::path resolve_config_file(const std::string &store_name, const fs::path &base_dir)
+    {
+        std::string norm = normalize_store_name(store_name);
+        fs::path rel(norm);
+        if (rel.is_absolute())
+        {
+            rel = rel.relative_path();
+        }
+        fs::path filtered;
+        for (const auto &part : rel)
+        {
+            auto s = part.string();
+            if (s == "." || s == "..")
+                continue;
+            filtered /= part;
+        }
+        fs::path dir  = base_dir / filtered.parent_path();
+        fs::path file = dir / (filtered.filename().string() + ".json");
+        return file;
     }
 };
 
@@ -372,12 +420,12 @@ class listener_manager
 };
 
 // 保存策略枚举
-enum class save_policy
+enum class SavePolicy
 {
-    auto_save,   // 每次变更自动保存 (默认)
-    manual_save, // 手动保存
-    batch_save,  // 批量保存 (延迟保存)
-    timed_save   // 定时保存
+    AutoSave,   // 每次变更自动保存 (默认)
+    ManualSave, // 手动保存
+    BatchSave,  // 批量保存 (延迟保存)
+    TimedSave   // 定时保存
 };
 
 // 配置存储类 - 支持JSON Pointer、路径策略和选择性值混淆
@@ -386,12 +434,17 @@ class config_store
   private:
     json data_;
     fs::path file_path_;
+    Path path_policy_{Path::AutoDetect};
+    std::string store_name_;
     mutable std::shared_mutex mutex_;
     std::unique_ptr<listener_manager> listeners_;
-    save_policy save_policy_;
+    SavePolicy save_policy_;
     std::atomic<bool> dirty_flag_{false};
     std::unique_ptr<std::thread> auto_save_thread_;
     std::chrono::milliseconds save_interval_{5000};
+    std::atomic<bool> stop_flag_{false};
+    std::condition_variable cv_;
+    std::mutex cv_mutex_;
 
     // 混淆信息映射：键 -> 混淆策略
     std::unordered_map<std::string, Obfuscate> obfuscate_map_;
@@ -425,7 +478,7 @@ class config_store
         }
         catch (const std::exception &e)
         {
-            throw config_exception("JSON Pointer错误: " + std::string(e.what()));
+            throw config_exception("JSON Pointer error: " + std::string(e.what()));
         }
     }
 
@@ -462,7 +515,7 @@ class config_store
         // 混淆指定的字段
         for (const auto &[key, policy] : obfuscate_map_)
         {
-            if (policy != Obfuscate::none)
+            if (policy != Obfuscate::None)
             {
                 if (is_json_pointer(key))
                 {
@@ -509,7 +562,7 @@ class config_store
         // 解混淆指定的字段
         for (const auto &[key, policy] : load_obfuscate_map)
         {
-            if (policy != Obfuscate::none)
+            if (policy != Obfuscate::None)
             {
                 if (is_json_pointer(key))
                 {
@@ -589,7 +642,7 @@ class config_store
             std::ifstream file(file_path_);
             if (!file.is_open())
             {
-                throw config_exception("无法打开配置文件: " + file_path_.string());
+                throw config_exception("Failed to open config file: " + file_path_.string());
             }
 
             json file_data;
@@ -600,11 +653,11 @@ class config_store
         }
         catch (const json::exception &e)
         {
-            throw config_exception("JSON解析错误: " + std::string(e.what()));
+            throw config_exception("JSON parse error: " + std::string(e.what()));
         }
         catch (const std::exception &e)
         {
-            throw config_exception("文件读取错误: " + std::string(e.what()));
+            throw config_exception("File read error: " + std::string(e.what()));
         }
     }
 
@@ -617,7 +670,7 @@ class config_store
             std::ofstream file(file_path_);
             if (!file.is_open())
             {
-                throw config_exception("无法写入配置文件: " + file_path_.string());
+                throw config_exception("Failed to write config file: " + file_path_.string());
             }
 
             // 混淆指定字段后保存
@@ -628,7 +681,7 @@ class config_store
         }
         catch (const std::exception &e)
         {
-            throw config_exception("保存配置文件失败: " + std::string(e.what()));
+            throw config_exception("Failed to save config file: " + std::string(e.what()));
         }
     }
 
@@ -636,14 +689,14 @@ class config_store
     {
         switch (save_policy_)
         {
-        case save_policy::auto_save:
+        case SavePolicy::AutoSave:
             save_to_file_internal();
             break;
-        case save_policy::batch_save:
-        case save_policy::timed_save:
+        case SavePolicy::BatchSave:
+        case SavePolicy::TimedSave:
             dirty_flag_ = true;
             break;
-        case save_policy::manual_save:
+        case SavePolicy::ManualSave:
             dirty_flag_ = true;
             break;
         }
@@ -651,13 +704,16 @@ class config_store
 
     void start_auto_save_thread()
     {
-        if (save_policy_ == save_policy::timed_save && !auto_save_thread_)
+        if (save_policy_ == SavePolicy::TimedSave && !auto_save_thread_)
         {
             auto_save_thread_ = std::make_unique<std::thread>([this]() {
-                while (save_policy_ == save_policy::timed_save)
+                for (;;)
                 {
-                    std::this_thread::sleep_for(save_interval_);
-                    if (dirty_flag_.load())
+                    std::unique_lock<std::mutex> lk(cv_mutex_);
+                    cv_.wait_for(lk, save_interval_, [this] { return stop_flag_.load() || dirty_flag_.load(); });
+                    if (stop_flag_.load())
+                        break;
+                    if (save_policy_ == SavePolicy::TimedSave && dirty_flag_.load())
                     {
                         std::shared_lock lock(mutex_);
                         save_to_file_internal();
@@ -677,17 +733,38 @@ class config_store
     }
 
   public:
-    explicit config_store(const std::string &name, save_policy policy = save_policy::auto_save,
-                          Path path_pol = Path::auto_detect)
-        : file_path_(path_manager::get_config_path(name, path_pol)), listeners_(std::make_unique<listener_manager>()),
+    explicit config_store(const std::string &name, SavePolicy policy = SavePolicy::AutoSave,
+                          Path path_pol = Path::AutoDetect)
+        : path_policy_(path_pol), store_name_(name), listeners_(std::make_unique<listener_manager>()),
           save_policy_(policy)
     {
+        if (path_policy_ == Path::AutoDetect)
+        {
+            auto appdata = path_manager::resolve_config_file(name, path_manager::get_appdata_directory());
+            auto current = path_manager::resolve_config_file(name, path_manager::get_current_dir_config());
+            if (fs::exists(appdata))
+                file_path_ = appdata;
+            else if (fs::exists(current))
+                file_path_ = current;
+            else
+                file_path_ = path_manager::get_config_path(name, path_policy_);
+        }
+        else if (path_policy_ == Path::CurrentDir)
+        {
+            file_path_ = path_manager::resolve_config_file(name, path_manager::get_current_dir_config());
+        }
+        else
+        {
+            file_path_ = path_manager::resolve_config_file(name, path_manager::get_appdata_directory());
+        }
+
         load_from_file();
         start_auto_save_thread();
     }
 
-    explicit config_store(const fs::path &path, save_policy policy = save_policy::auto_save)
-        : file_path_(path), listeners_(std::make_unique<listener_manager>()), save_policy_(policy)
+    explicit config_store(const fs::path &path, SavePolicy policy = SavePolicy::AutoSave)
+        : file_path_(path), path_policy_(Path::CurrentDir), store_name_(path.stem().string()),
+          listeners_(std::make_unique<listener_manager>()), save_policy_(policy)
     {
         load_from_file();
         start_auto_save_thread();
@@ -695,6 +772,8 @@ class config_store
 
     ~config_store()
     {
+        stop_flag_.store(true);
+        cv_.notify_all();
         stop_auto_save_thread();
         if (dirty_flag_.load())
         {
@@ -718,11 +797,15 @@ class config_store
             auto value = get_value_by_pointer(key);
             if (value.is_null())
             {
-                throw config_exception("JSON Pointer路径不存在: " + key);
+                throw config_exception("JSON Pointer path not found: " + key);
             }
             return value.get<T>();
         }
-        return data_[key].get<T>();
+        if (!data_.contains(key))
+        {
+            throw config_exception("Key not found: " + key);
+        }
+        return data_.at(key).get<T>();
     }
 
     template <typename T> T get_or(const std::string &key, const T &default_value) const
@@ -789,7 +872,7 @@ class config_store
             }
 
             // 设置混淆策略
-            if (obf_policy != Obfuscate::none)
+            if (obf_policy != Obfuscate::None)
             {
                 obfuscate_map_[key] = obf_policy;
             }
@@ -805,7 +888,7 @@ class config_store
 
     // 专门的混淆设置方法
     template <typename T>
-    void set_obfuscated(const std::string &key, const T &value, Obfuscate obf_policy = Obfuscate::combined)
+    void set_obfuscated(const std::string &key, const T &value, Obfuscate obf_policy = Obfuscate::Combined)
     {
         set(key, value, obf_policy);
     }
@@ -847,8 +930,7 @@ class config_store
                     // JSON Pointer删除需要特殊处理
                     try
                     {
-                        auto ptr = nlohmann::json::json_pointer(key);
-                        // 获取父路径和键名
+                        auto ptr        = nlohmann::json::json_pointer(key);
                         auto parent_ptr = ptr.parent_pointer();
                         auto last_key   = ptr.back();
 
@@ -858,10 +940,24 @@ class config_store
                         }
                         else
                         {
-                            auto &parent = data_[parent_ptr];
+                            auto &parent = data_.at(parent_ptr);
                             if (parent.is_object())
                             {
                                 parent.erase(last_key);
+                            }
+                            else if (parent.is_array())
+                            {
+                                try
+                                {
+                                    size_t idx = static_cast<size_t>(std::stoll(last_key));
+                                    if (idx < parent.size())
+                                    {
+                                        parent.erase(parent.begin() + static_cast<std::ptrdiff_t>(idx));
+                                    }
+                                }
+                                catch (...)
+                                {
+                                }
                             }
                         }
                     }
@@ -901,9 +997,32 @@ class config_store
         save_to_file_internal();
     }
 
+    void set_save_interval(std::chrono::milliseconds interval)
+    {
+        save_interval_ = interval;
+        cv_.notify_all();
+    }
+
     void reload()
     {
         std::unique_lock lock(mutex_);
+        if (path_policy_ == Path::AutoDetect)
+        {
+            auto appdata = path_manager::resolve_config_file(store_name_, path_manager::get_appdata_directory());
+            auto current = path_manager::resolve_config_file(store_name_, path_manager::get_current_dir_config());
+            if (fs::exists(appdata))
+                file_path_ = appdata;
+            else if (fs::exists(current))
+                file_path_ = current;
+        }
+        else if (path_policy_ == Path::CurrentDir)
+        {
+            file_path_ = path_manager::resolve_config_file(store_name_, path_manager::get_current_dir_config());
+        }
+        else
+        {
+            file_path_ = path_manager::resolve_config_file(store_name_, path_manager::get_appdata_directory());
+        }
         load_from_file();
     }
 
@@ -947,14 +1066,14 @@ class config_store
     {
         std::shared_lock lock(mutex_);
         auto it = obfuscate_map_.find(key);
-        return (it != obfuscate_map_.end()) ? it->second : Obfuscate::none;
+        return (it != obfuscate_map_.end()) ? it->second : Obfuscate::None;
     }
 
     // 设置字段的混淆策略（不改变值）
     void set_obfuscate_policy(const std::string &key, Obfuscate policy)
     {
         std::unique_lock lock(mutex_);
-        if (policy != Obfuscate::none)
+        if (policy != Obfuscate::None)
         {
             obfuscate_map_[key] = policy;
         }
@@ -968,7 +1087,7 @@ class config_store
     // 检查字段是否被混淆
     bool is_obfuscated(const std::string &key) const
     {
-        return get_obfuscate_policy(key) != Obfuscate::none;
+        return get_obfuscate_policy(key) != Obfuscate::None;
     }
 
     // 获取所有混淆字段
@@ -1002,12 +1121,12 @@ class config_store
 class registry
 {
   private:
-    static std::unordered_map<std::string, std::shared_ptr<config_store>> stores_;
-    static std::shared_mutex mutex_;
+    inline static std::unordered_map<std::string, std::shared_ptr<config_store>> stores_;
+    inline static std::shared_mutex mutex_;
 
   public:
-    static std::shared_ptr<config_store> get_store(const std::string &name, save_policy policy = save_policy::auto_save,
-                                                   Path path_pol = Path::auto_detect)
+    static std::shared_ptr<config_store> get_store(const std::string &name, SavePolicy policy = SavePolicy::AutoSave,
+                                                   Path path_pol = Path::AutoDetect)
     {
         std::shared_lock lock(mutex_);
         auto it = stores_.find(name);
@@ -1048,13 +1167,9 @@ class registry
     }
 };
 
-// 静态成员定义
-std::unordered_map<std::string, std::shared_ptr<config_store>> registry::stores_;
-std::shared_mutex registry::mutex_;
-
 // 便捷函数
-inline std::shared_ptr<config_store> get_store(const std::string &name, save_policy policy = save_policy::auto_save,
-                                               Path path_pol = Path::auto_detect)
+inline std::shared_ptr<config_store> get_store(const std::string &name, SavePolicy policy = SavePolicy::AutoSave,
+                                               Path path_pol = Path::AutoDetect)
 {
     return registry::get_store(name, policy, path_pol);
 }

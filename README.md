@@ -41,14 +41,14 @@ git clone https://github.com/Hunlongyu/config.git
 
 - C++20 或更高版本
 - nlohmann/json
-- Windows SDK（当前仅支持 Windows）
+- Windows/Linux/macOS（跨平台路径策略）
 
 ## 快速开始
 
 ### 基本用法
 
 ```cpp
-#include "config.hpp"
+#include "config/config.h"
 
 // 使用全局配置
 config::set("username", "张三");
@@ -171,6 +171,6 @@ MIT License
 
 ## 注意事项
 
-- 当前版本仅支持 Windows 平台
+- 提供跨平台支持（Windows/Linux/macOS）
 - 需要 C++20 编译器支持
 - 混淆功能仅为基础保护，不适用于高安全性要求的场景
