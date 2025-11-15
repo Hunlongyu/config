@@ -1,0 +1,9 @@
+#pragma once
+#include <string>
+namespace config {
+inline constexpr int version_major = @PROJECT_VERSION_MAJOR@;
+inline constexpr int version_minor = @PROJECT_VERSION_MINOR@;
+inline constexpr int version_patch = @PROJECT_VERSION_PATCH@;
+inline constexpr const char* version_string = "@PROJECT_VERSION@";
+inline std::string version() { return version_string; }
+}

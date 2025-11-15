@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(config VERSION 0.0.1 LANGUAGES CXX)
+project(config VERSION 0.0.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -25,6 +25,7 @@ add_library(config::config ALIAS config)
 
 target_include_directories(config INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 
@@ -35,6 +36,8 @@ if(WIN32)
 endif()
 
 include(CMakePackageConfigHelpers)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/config/version.h.in
+               ${CMAKE_CURRENT_BINARY_DIR}/include/config/version.h @ONLY)
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/configConfigVersion.cmake
   VERSION ${PROJECT_VERSION}
@@ -50,6 +53,11 @@ install(
   DIRECTORY include/
   DESTINATION include
   FILES_MATCHING PATTERN "*.h"
+)
+
+install(FILES
+  ${CMAKE_CURRENT_BINARY_DIR}/include/config/version.h
+  DESTINATION include/config
 )
 
 install(

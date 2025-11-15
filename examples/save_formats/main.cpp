@@ -1,9 +1,13 @@
-#include <iostream>
-#include <filesystem>
 #include <config/config.h>
+#include <config/version.h>
+#include <filesystem>
+#include <iostream>
 
-int main() {
+int main()
+{
     using namespace config;
+    std::cout << "config version: " << version() << std::endl;
+
     config_store formatted("save_formats_formatted", SavePolicy::ManualSave, Path::CurrentDir);
     formatted.set_save_format(SaveFormat::Formatted);
     formatted.set<std::string>("name", "example");
