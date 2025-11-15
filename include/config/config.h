@@ -21,6 +21,7 @@
 #include <unordered_map>
 #include <vector>
 #if defined(_WIN32)
+#include <shlobj.h>
 #include <windows.h>
 #endif
 #if defined(__APPLE__)
@@ -244,18 +245,28 @@ class path_manager
     }
     static fs::path get_appdata_directory()
     {
-        const char *p = nullptr;
 #if defined(_WIN32)
-        p = std::getenv("LOCALAPPDATA");
-        if (p && *p)
+        WCHAR wbuf[MAX_PATH]{};
+        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, wbuf)))
         {
-            return fs::path(p) / get_program_name();
+            return fs::path(std::wstring(wbuf)) / get_program_name();
         }
-        const char *user = std::getenv("USERPROFILE");
-        if (user && *user)
+        size_t len = 0;
+        char *buf  = nullptr;
+        if (_dupenv_s(&buf, &len, "LOCALAPPDATA") == 0 && buf && *buf)
         {
-            return fs::path(user) / "AppData" / "Local" / get_program_name();
+            const fs::path p(buf);
+            free(buf);
+            return p / get_program_name();
         }
+        if (_dupenv_s(&buf, &len, "USERPROFILE") == 0 && buf && *buf)
+        {
+            const fs::path p(buf);
+            free(buf);
+            return p / "AppData" / "Local" / get_program_name();
+        }
+        if (buf)
+            free(buf);
         return fs::current_path();
 #elif defined(__APPLE__)
         const char *home = std::getenv("HOME");

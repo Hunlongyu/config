@@ -10,7 +10,7 @@
 - 📂 **智能路径管理** - 自动选择最佳配置目录（AppData/当前目录）
 - 🔔 **变更监听** - 支持配置变更回调通知
 - 🧵 **线程安全** - 使用读写锁保证并发安全
-- 📦 **Header-Only** - 仅头文件实现，易于集成
+- 📦 **Header-Only** - 仅头文件库（CMake INTERFACE 目标），易于集成
 
 ## 安装
 
@@ -48,7 +48,7 @@ git clone https://github.com/Hunlongyu/config.git
 ### 基本用法
 
 ```cpp
-#include "config/config.h"
+#include <config/config.h>
 
 // 使用全局配置
 config::set("username", "张三");
@@ -97,7 +97,7 @@ auto host = config::get<std::string>("/server/host");
 ```cpp
 // 设置敏感数据时使用混淆
 config::set_obfuscated("api_key", "sk-1234567890abcdef");
-config::set("password", "secret123", config::Obfuscate::combined);
+config::set("password", "secret123", config::Obfuscate::Combined);
 
 // 获取时自动解混淆
 auto api_key = config::get<std::string>("api_key");
@@ -123,15 +123,15 @@ store->disconnect(listener_id);
 using namespace config;
 
 // 自动保存（默认）
-auto config1 = get_store("app", save_policy::auto_save);
+auto config1 = get_store("app", SavePolicy::AutoSave);
 
 // 手动保存
-auto config2 = get_store("cache", save_policy::manual_save);
+auto config2 = get_store("cache", SavePolicy::ManualSave);
 config2->set("key", "value");
 config2->save();  // 手动保存
 
 // 定时保存
-auto config3 = get_store("logs", save_policy::timed_save);
+auto config3 = get_store("logs", SavePolicy::TimedSave);
 ```
 
 ## 路径策略
@@ -140,22 +140,22 @@ auto config3 = get_store("logs", save_policy::timed_save);
 using namespace config;
 
 // 自动检测路径（优先 AppData）
-auto config1 = get_store("app", save_policy::auto_save, Path::auto_detect);
+auto config1 = get_store("app", SavePolicy::AutoSave, Path::AutoDetect);
 
 // 强制使用 AppData 目录
-auto config2 = get_store("user", save_policy::auto_save, Path::appdata);
+auto config2 = get_store("user", SavePolicy::AutoSave, Path::AppData);
 
 // 使用当前目录
-auto config3 = get_store("local", save_policy::auto_save, Path::current_dir);
+auto config3 = get_store("local", SavePolicy::AutoSave, Path::CurrentDir);
 ```
 
 ## 混淆策略
 
-- `Obfuscate::none` - 无混淆
-- `Obfuscate::base64` - Base64 编码
-- `Obfuscate::xor_cipher` - XOR 异或混淆
-- `Obfuscate::char_shift` - 字符位移混淆
-- `Obfuscate::combined` - 组合混淆（推荐）
+- `Obfuscate::None` - 无混淆
+- `Obfuscate::Base64` - Base64 编码
+- `Obfuscate::XorCipher` - XOR 异或混淆
+- `Obfuscate::CharShift` - 字符位移混淆
+- `Obfuscate::Combined` - 组合混淆（推荐）
 
 ## 更多示例
 
