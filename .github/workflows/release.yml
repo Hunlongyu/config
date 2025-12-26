@@ -41,7 +41,7 @@ jobs:
             asset_name: config-macos.tar.gz
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Configure CMake
       run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DBUILD_CONFIG_EXAMPLES=OFF -DBUILD_CONFIG_BENCHMARK=OFF

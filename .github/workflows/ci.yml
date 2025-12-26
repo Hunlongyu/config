@@ -16,7 +16,7 @@ jobs:
         build_type: [Release]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Configure CMake
       run: |
@@ -48,7 +48,7 @@ jobs:
 
     - name: Upload Coverage Artifact
       if: runner.os == 'Linux' && matrix.build_type == 'Release'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverage-report
         path: coverage_report/
