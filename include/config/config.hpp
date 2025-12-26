@@ -32,40 +32,54 @@
 namespace config
 {
 
-// 3.1 枚举类型定义
+/**
+ * @brief Enum defining path types for configuration files.
+ */
 enum class Path
 {
-    Absolute, // 绝对路径
-    Relative, // 相对于运行目录
-    AppData   // 系统 AppData 目录
+    Absolute, ///< Absolute file path.
+    Relative, ///< Relative path to the current working directory.
+    AppData   ///< System-specific application data directory (e.g., %APPDATA% on Windows).
 };
 
+/**
+ * @brief Enum defining JSON output formats.
+ */
 enum class JsonFormat
 {
-    Pretty, // 格式化输出（缩进4空格）
-    Compact // 压缩输出（无空格换行）
+    Pretty, ///< Indented output (4 spaces) for readability.
+    Compact ///< Minified output without whitespace.
 };
 
+/**
+ * @brief Enum defining available obfuscation methods.
+ */
 enum class Obfuscate
 {
-    None,    // 不混淆
-    Base64,  // Base64 编码
-    Hex,     // 十六进制编码
-    ROT13,   // ROT13 字符替换
-    Reverse, // 字符串反转
-    Combined // 组合混淆（Base64 + Reverse）
+    None,    ///< No obfuscation (plaintext).
+    Base64,  ///< Base64 encoding.
+    Hex,     ///< Hexadecimal string encoding.
+    ROT13,   ///< ROT13 substitution cipher.
+    Reverse, ///< String reversal.
+    Combined ///< Combined strategy (Base64 + Reverse).
 };
 
+/**
+ * @brief Enum defining when configuration changes are saved to disk.
+ */
 enum class SaveStrategy
 {
-    Auto,  // 自动保存（每次 set 后立即保存）
-    Manual // 手动保存（需要显式调用 save）
+    Auto,  ///< Automatically save to disk after every 'set' operation.
+    Manual ///< Only save to disk when 'save()' is explicitly called.
 };
 
+/**
+ * @brief Enum defining behavior when a key is missing during retrieval.
+ */
 enum class GetStrategy
 {
-    DefaultValue,  // 返回类型的默认值
-    ThrowException // 抛出异常
+    DefaultValue,  ///< Return a type-specific default value if key is missing.
+    ThrowException ///< Throw a std::runtime_error if key is missing.
 };
 
 namespace detail
@@ -75,7 +89,7 @@ class ObfuscationEngine
 {
     static constexpr char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    static bool is_base64(unsigned char c)
+    static bool is_base64(const unsigned char c)
     {
         return (isalnum(c) || (c == '+') || (c == '/'));
     }
@@ -222,7 +236,7 @@ class ObfuscationEngine
         return result;
     }
 
-    static std::string encrypt(const std::string &input, Obfuscate obf)
+    static std::string encrypt(const std::string &input, const Obfuscate obf)
     {
         switch (obf)
         {
@@ -242,7 +256,7 @@ class ObfuscationEngine
         }
     }
 
-    static std::string decrypt(const std::string &input, Obfuscate obf)
+    static std::string decrypt(const std::string &input, const Obfuscate obf)
     {
         switch (obf)
         {
@@ -323,7 +337,7 @@ class PathResolver
 #endif
     }
 
-    static std::string resolve(const std::string &path, Path type)
+    static std::string resolve(const std::string &path, const Path type)
     {
         const std::filesystem::path p(path);
 
@@ -348,6 +362,12 @@ class PathResolver
 
 } // namespace detail
 
+/**
+ * @brief Thread-safe configuration store managing JSON data persistence and retrieval.
+ *
+ * Provides thread-safe access to configuration data stored in JSON format.
+ * Supports strategies for saving behavior, path resolution, and error handling.
+ */
 class ConfigStore
 {
   public:
@@ -525,8 +545,17 @@ class ConfigStore
     }
 
   public:
-    ConfigStore(const std::string &path, Path type = Path::Relative, SaveStrategy save_strategy = SaveStrategy::Auto,
-                GetStrategy get_strategy = GetStrategy::DefaultValue)
+    /**
+     * @brief Constructs a new ConfigStore instance.
+     *
+     * @param path File path for the configuration file.
+     * @param type Strategy for resolving the file path.
+     * @param save_strategy Strategy for saving changes (Auto or Manual).
+     * @param get_strategy Strategy for handling missing keys (DefaultValue or ThrowException).
+     */
+    ConfigStore(const std::string &path, const Path type = Path::Relative,
+                const SaveStrategy save_strategy = SaveStrategy::Auto,
+                const GetStrategy get_strategy   = GetStrategy::DefaultValue)
         : path_type_(type), save_strategy_(save_strategy), get_strategy_(get_strategy)
     {
         file_path_ = detail::PathResolver::resolve(path, type);
@@ -538,80 +567,173 @@ class ConfigStore
     ConfigStore(ConfigStore &&)                 = delete;
     ConfigStore &operator=(ConfigStore &&)      = delete;
 
+    /**
+     * @brief Gets the absolute path to the configuration file.
+     * @return Absolute file path string.
+     */
     std::string get_store_path() const
     {
         return file_path_;
     }
 
-    void set_save_strategy(SaveStrategy strategy)
+    /**
+     * @brief Sets the strategy for saving configuration changes.
+     * @param strategy The new SaveStrategy (Auto or Manual).
+     */
+    void set_save_strategy(const SaveStrategy strategy)
     {
         std::unique_lock lock(mutex_);
         save_strategy_ = strategy;
     }
 
+    /**
+     * @brief Gets the current save strategy.
+     * @return Current SaveStrategy.
+     */
     SaveStrategy get_save_strategy() const
     {
         std::shared_lock lock(mutex_);
         return save_strategy_;
     }
 
-    void set_get_strategy(GetStrategy strategy)
+    /**
+     * @brief Sets the strategy for handling missing keys.
+     * @param strategy The new GetStrategy (DefaultValue or ThrowException).
+     */
+    void set_get_strategy(const GetStrategy strategy)
     {
         std::unique_lock lock(mutex_);
         get_strategy_ = strategy;
     }
 
+    /**
+     * @brief Gets the current retrieval strategy.
+     * @return Current GetStrategy.
+     */
     GetStrategy get_get_strategy() const
     {
         std::shared_lock lock(mutex_);
         return get_strategy_;
     }
 
-    void set_format(JsonFormat format)
+    /**
+     * @brief Sets the JSON output format.
+     * @param format The new JsonFormat (Pretty or Compact).
+     */
+    void set_format(const JsonFormat format)
     {
         std::unique_lock lock(mutex_);
         json_format_ = format;
     }
 
+    /**
+     * @brief Gets the current JSON output format.
+     * @return Current JsonFormat.
+     */
     JsonFormat get_format() const
     {
         std::shared_lock lock(mutex_);
         return json_format_;
     }
 
+    /**
+     * @brief Retrieves a value from the configuration with a default fallback.
+     *
+     * @tparam T Type of the value to retrieve.
+     * @param key The configuration key or JSON Pointer path (e.g., "section/key").
+     * @param default_value The value to return if the key is not found.
+     * @return The retrieved value or default_value.
+     */
     template <typename T> T get(const std::string &key, const T &default_value) const
     {
         std::shared_lock lock(mutex_);
-        const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
-        try
+        if (key.find('/') == std::string::npos)
         {
-            return data_.at(nlohmann::json::json_pointer(ptr_str)).get<T>();
-        }
-        catch (...)
-        {
+            auto it = data_.find(key);
+            if (it != data_.end())
+            {
+                try
+                {
+                    return it->get<T>();
+                }
+                catch (...)
+                {
+                    return default_value;
+                }
+            }
             return default_value;
         }
+
+        const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+        const nlohmann::json::json_pointer ptr(ptr_str);
+        if (data_.contains(ptr))
+        {
+            try
+            {
+                return data_.at(ptr).get<T>();
+            }
+            catch (...)
+            {
+                return default_value;
+            }
+        }
+        return default_value;
     }
 
+    /**
+     * @brief Retrieves a value from the configuration.
+     *
+     * Behavior depends on the current GetStrategy if the key is missing:
+     * - DefaultValue: Returns T{}
+     * - ThrowException: Throws std::runtime_error
+     *
+     * @tparam T Type of the value to retrieve.
+     * @param key The configuration key or JSON Pointer path.
+     * @return The retrieved value.
+     * @throws std::runtime_error If key is missing and strategy is ThrowException.
+     */
     template <typename T> T get(const std::string &key) const
     {
         std::shared_lock lock(mutex_);
-        const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
-        try
+        if (key.find('/') == std::string::npos)
         {
-            return data_.at(nlohmann::json::json_pointer(ptr_str)).get<T>();
-        }
-        catch (...)
-        {
+            auto it = data_.find(key);
+            if (it != data_.end())
+            {
+                return it->get<T>();
+            }
             if (get_strategy_ == GetStrategy::ThrowException)
             {
                 throw std::runtime_error("Key not found: " + key);
             }
             return T{};
         }
+
+        const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+        const nlohmann::json::json_pointer ptr(ptr_str);
+        if (data_.contains(ptr))
+        {
+            return data_.at(ptr).get<T>();
+        }
+
+        if (get_strategy_ == GetStrategy::ThrowException)
+        {
+            throw std::runtime_error("Key not found: " + key);
+        }
+        return T{};
     }
 
-    template <typename T> void set(const std::string &key, const T &value, Obfuscate obf = Obfuscate::None)
+    /**
+     * @brief Sets a value in the configuration.
+     *
+     * @tparam T Type of the value to set.
+     * @param key The configuration key or JSON Pointer path.
+     * @param value The value to store.
+     * @param obf Obfuscation method to apply (optional).
+     * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
+     * @throws std::runtime_error If setting the value fails in memory (e.g., path conflict).
+     */
+    template <typename T> bool set(const std::string &key, const T &value, const Obfuscate obf = Obfuscate::None)
     {
         {
             std::unique_lock lock(mutex_);
@@ -629,9 +751,9 @@ class ConfigStore
                     obfuscation_map_.erase(key);
                 }
             }
-            catch (const std::exception &)
+            catch (const std::exception &e)
             {
-                // Should we throw?
+                throw std::runtime_error(std::string("Config set failed for key '") + key + "': " + e.what());
             }
         }
 
@@ -639,11 +761,17 @@ class ConfigStore
 
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            save();
+            return save();
         }
+        return true;
     }
 
-    void remove(const std::string &key)
+    /**
+     * @brief Removes a key and its value from the configuration.
+     * @param key The configuration key or JSON Pointer path to remove.
+     * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
+     */
+    bool remove(const std::string &key)
     {
         {
             std::unique_lock lock(mutex_);
@@ -674,10 +802,16 @@ class ConfigStore
         }
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            save();
+            return save();
         }
+        return true;
     }
 
+    /**
+     * @brief Checks if a key exists in the configuration.
+     * @param key The configuration key or JSON Pointer path.
+     * @return true if the key exists, false otherwise.
+     */
     bool contains(const std::string &key) const
     {
         std::shared_lock lock(mutex_);
@@ -685,14 +819,30 @@ class ConfigStore
         return data_.contains(nlohmann::json::json_pointer(ptr_str));
     }
 
-    void save()
+    /**
+     * @brief Saves the current configuration to disk using the current format.
+     * @return true if saved successfully, false otherwise.
+     */
+    bool save() const
     {
-        save(json_format_);
+        return save(json_format_);
     }
 
-    void save(JsonFormat format)
+    /**
+     * @brief Saves the current configuration to disk using a specific format.
+     * @param format The output format (Pretty or Compact).
+     * @return true if saved successfully, false otherwise.
+     */
+    bool save(JsonFormat format) const
     {
-        std::shared_lock lock(mutex_); // Read data, but write file.
+        json save_data;
+        std::unordered_map<std::string, Obfuscate> obf_map_copy;
+
+        {
+            std::shared_lock lock(mutex_);
+            save_data    = data_;
+            obf_map_copy = obfuscation_map_;
+        }
 
         // Ensure directory exists
         try
@@ -705,39 +855,39 @@ class ConfigStore
         }
         catch (...)
         {
+            return false;
         }
-
-        // Copy data to modify for obfuscation
-        json save_data = data_;
 
         // Apply obfuscation
-        for (const auto &[key, type] : obfuscation_map_)
+        if (!obf_map_copy.empty())
         {
-            if (type == Obfuscate::None)
-                continue;
-            std::string ptr_str = (key.front() == '/') ? key : "/" + key;
-            try
+            for (const auto &[key, type] : obf_map_copy)
             {
-                nlohmann::json::json_pointer ptr(ptr_str);
-                if (save_data.contains(ptr))
+                if (type == Obfuscate::None)
+                    continue;
+
+                std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+                try
                 {
-                    auto &val = save_data[ptr];
-                    if (val.is_string())
+                    nlohmann::json::json_pointer ptr(ptr_str);
+                    if (save_data.contains(ptr))
                     {
-                        val = detail::ObfuscationEngine::encrypt(val.get<std::string>(), type);
+                        auto &val = save_data[ptr];
+                        if (val.is_string())
+                        {
+                            val = detail::ObfuscationEngine::encrypt(val.get<std::string>(), type);
+                        }
                     }
                 }
+                catch (...)
+                {
+                    // Skip this key if obfuscation fails
+                }
             }
-            catch (...)
-            {
-            }
-        }
 
-        // Add meta
-        if (!obfuscation_map_.empty())
-        {
+            // Add meta
             json meta;
-            for (const auto &[key, val] : obfuscation_map_)
+            for (const auto &[key, val] : obf_map_copy)
             {
                 meta[key] = static_cast<int>(val);
             }
@@ -747,6 +897,10 @@ class ConfigStore
         try
         {
             std::ofstream file(file_path_);
+            if (!file.is_open())
+            {
+                return false;
+            }
             if (format == JsonFormat::Pretty)
             {
                 file << save_data.dump(4);
@@ -755,19 +909,30 @@ class ConfigStore
             {
                 file << save_data.dump();
             }
+            return file.good();
         }
         catch (...)
         {
+            return false;
         }
     }
 
+    /**
+     * @brief Reloads configuration from disk, discarding current memory state.
+     */
     void reload()
     {
         std::unique_lock lock(mutex_);
         load();
     }
 
-    void clear()
+    /**
+     * @brief Clears all configuration data and obfuscation rules.
+     * If SaveStrategy is Auto, this change is immediately persisted to disk.
+     *
+     * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
+     */
+    bool clear()
     {
         {
             std::unique_lock lock(mutex_);
@@ -776,10 +941,20 @@ class ConfigStore
         }
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            save();
+            return save();
         }
+        return true;
     }
 
+    /**
+     * @brief Connects a listener callback to a specific key.
+     *
+     * The callback will be invoked whenever the value of the key (or its children) changes.
+     *
+     * @param key The key to listen to.
+     * @param callback Function to call on change.
+     * @return ID of the listener (used for disconnecting).
+     */
     size_t connect(const std::string &key, const std::function<void(const nlohmann::json &)> &callback)
     {
         std::unique_lock lock(mutex_);
@@ -788,6 +963,10 @@ class ConfigStore
         return id;
     }
 
+    /**
+     * @brief Disconnects a listener by its ID.
+     * @param connection_id The ID returned by connect().
+     */
     void disconnect(size_t connection_id)
     {
         std::unique_lock lock(mutex_);
@@ -813,6 +992,18 @@ inline std::mutex &get_mutex()
 }
 } // namespace registry
 
+/**
+ * @brief Retrieves or creates a ConfigStore instance.
+ *
+ * This is the primary entry point for managing multiple configuration files.
+ * Instances are cached by path.
+ *
+ * @param path File path for the configuration.
+ * @param type Strategy for resolving the file path.
+ * @param save_strategy Strategy for saving changes.
+ * @param get_strategy Strategy for handling missing keys.
+ * @return Reference to the ConfigStore instance.
+ */
 inline ConfigStore &get_store(const std::string &path, Path type = Path::Relative,
                               SaveStrategy save_strategy = SaveStrategy::Auto,
                               GetStrategy get_strategy   = GetStrategy::DefaultValue)
@@ -833,70 +1024,118 @@ inline ConfigStore &get_default_store()
     return get_store("config.json");
 }
 
-inline void set_save_strategy(SaveStrategy strategy)
+/**
+ * @brief Global convenience function: Sets save strategy for the default store.
+ */
+inline void set_save_strategy(const SaveStrategy strategy)
 {
     get_default_store().set_save_strategy(strategy);
 }
+/**
+ * @brief Global convenience function: Gets save strategy of the default store.
+ */
 inline SaveStrategy get_save_strategy()
 {
     return get_default_store().get_save_strategy();
 }
-inline void set_get_strategy(GetStrategy strategy)
+/**
+ * @brief Global convenience function: Sets get strategy for the default store.
+ */
+inline void set_get_strategy(const GetStrategy strategy)
 {
     get_default_store().set_get_strategy(strategy);
 }
+/**
+ * @brief Global convenience function: Gets get strategy of the default store.
+ */
 inline GetStrategy get_get_strategy()
 {
     return get_default_store().get_get_strategy();
 }
 
+/**
+ * @brief Global convenience function: Gets a value from the default store with a default fallback.
+ */
 template <typename T> T get(const std::string &key, const T &default_value)
 {
     return get_default_store().get<T>(key, default_value);
 }
+/**
+ * @brief Global convenience function: Gets a value from the default store.
+ */
 template <typename T> T get(const std::string &key)
 {
     return get_default_store().get<T>(key);
 }
-template <typename T> void set(const std::string &key, const T &value, Obfuscate obf = Obfuscate::None)
+/**
+ * @brief Global convenience function: Sets a value in the default store.
+ */
+template <typename T> bool set(const std::string &key, const T &value, Obfuscate obf = Obfuscate::None)
 {
-    get_default_store().set(key, value, obf);
+    return get_default_store().set(key, value, obf);
 }
-inline void remove(const std::string &key)
+/**
+ * @brief Global convenience function: Removes a key from the default store.
+ */
+inline bool remove(const std::string &key)
 {
-    get_default_store().remove(key);
+    return get_default_store().remove(key);
 }
+/**
+ * @brief Global convenience function: Checks if a key exists in the default store.
+ */
 inline bool contains(const std::string &key)
 {
     return get_default_store().contains(key);
 }
 
-inline void save()
+/**
+ * @brief Global convenience function: Saves the default store to disk.
+ */
+inline bool save()
 {
-    get_default_store().save();
+    return get_default_store().save();
 }
-inline void save(JsonFormat format)
+/**
+ * @brief Global convenience function: Saves the default store to disk with format.
+ */
+inline bool save(const JsonFormat format)
 {
-    get_default_store().save(format);
+    return get_default_store().save(format);
 }
+/**
+ * @brief Global convenience function: Reloads the default store from disk.
+ */
 inline void reload()
 {
     get_default_store().reload();
 }
-inline void clear()
+/**
+ * @brief Global convenience function: Clears the default store.
+ */
+inline bool clear()
 {
-    get_default_store().clear();
+    return get_default_store().clear();
 }
 
-inline void set_format(JsonFormat format)
+/**
+ * @brief Global convenience function: Sets format for the default store.
+ */
+inline void set_format(const JsonFormat format)
 {
     get_default_store().set_format(format);
 }
+/**
+ * @brief Global convenience function: Gets format of the default store.
+ */
 inline JsonFormat get_format()
 {
     return get_default_store().get_format();
 }
 
+/**
+ * @brief Global convenience function: Gets the file path of the default store.
+ */
 inline std::string get_store_path()
 {
     return get_default_store().get_store_path();

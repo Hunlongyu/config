@@ -1,0 +1,54 @@
+name: C++ CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        build_type: [Release]
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Configure CMake
+      run: |
+        if [ "${{ runner.os }}" == "Linux" ]; then
+          sudo apt-get update
+          sudo apt-get install -y clang-tidy
+          cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DCMAKE_CXX_FLAGS="--coverage" -DCMAKE_EXE_LINKER_FLAGS="--coverage" -DBUILD_CLANG_TIDY=ON
+        else
+          cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
+        fi
+      shell: bash
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{matrix.build_type}}
+
+    - name: Test
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C ${{matrix.build_type}} --output-on-failure
+
+    - name: Generate Coverage Report (Linux only)
+      if: runner.os == 'Linux' && matrix.build_type == 'Release'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lcov
+        lcov --capture --directory ${{github.workspace}}/build --output-file coverage.info
+        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/examples/*' '*/nlohmann/*' --output-file coverage.info
+        lcov --list coverage.info
+        genhtml coverage.info --output-directory coverage_report
+
+    - name: Upload Coverage Artifact
+      if: runner.os == 'Linux' && matrix.build_type == 'Release'
+      uses: actions/upload-artifact@v3
+      with:
+        name: coverage-report
+        path: coverage_report/

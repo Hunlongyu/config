@@ -1,0 +1,20 @@
+---
+Checks: '
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  cppcoreguidelines-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-type-vararg,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -cert-err58-cpp
+'
+WarningsAsErrors: ''
+HeaderFilterRegex: 'include/config/.*'
+FormatStyle: file
+...

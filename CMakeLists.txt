@@ -1,14 +1,31 @@
 cmake_minimum_required(VERSION 3.28)
 
-project(config VERSION 0.0.2 LANGUAGES CXX)
+project(
+  config
+  VERSION 0.1.0
+  LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Clang-Tidy Support
+option(BUILD_CLANG_TIDY "Enable Clang-Tidy static analysis" OFF)
+if(BUILD_CLANG_TIDY)
+  find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
+  if(CLANG_TIDY_EXE)
+    message(STATUS "Clang-Tidy found: ${CLANG_TIDY_EXE}")
+    set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+  else()
+    message(WARNING "Clang-Tidy requested but not found!")
+  endif()
+endif()
+
 if(MSVC)
   add_compile_options(/W4)
   add_compile_options(/utf-8)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-Wall -Wextra)
 endif()
 
 option(CONFIG_FETCH_JSON "Automatically fetch nlohmann_json if not found" ON)
@@ -19,8 +36,7 @@ if(NOT nlohmann_json_FOUND AND CONFIG_FETCH_JSON)
   FetchContent_Declare(
     json
     GIT_REPOSITORY https://gitee.com/mirrors/nlohmann-json.git
-    GIT_TAG v3.11.3
-  )
+    GIT_TAG v3.11.3)
   FetchContent_MakeAvailable(json)
   if(NOT TARGET nlohmann_json::nlohmann_json)
     add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
@@ -30,11 +46,11 @@ endif()
 add_library(config INTERFACE)
 add_library(config::config ALIAS config)
 
-target_include_directories(config INTERFACE
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-  $<INSTALL_INTERFACE:include>
-)
+target_include_directories(
+  config
+  INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+            $<INSTALL_INTERFACE:include>)
 
 target_compile_features(config INTERFACE cxx_std_20)
 target_link_libraries(config INTERFACE nlohmann_json::nlohmann_json)
@@ -48,54 +64,47 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/config/version.h.in
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/configConfigVersion.cmake
   VERSION ${PROJECT_VERSION}
-  COMPATIBILITY SameMajorVersion
-)
+  COMPATIBILITY SameMajorVersion)
 
-install(
-  TARGETS config
-  EXPORT config-targets
-)
+install(TARGETS config EXPORT config-targets)
 
 if(TARGET nlohmann_json)
-  install(
-    TARGETS nlohmann_json
-    EXPORT config-targets
-  )
+  install(TARGETS nlohmann_json EXPORT config-targets)
 endif()
 
 install(
   DIRECTORY include/
   DESTINATION include
-  FILES_MATCHING PATTERN "*.hpp"
-)
+  FILES_MATCHING
+  PATTERN "*.hpp")
 
-install(FILES
-  ${CMAKE_CURRENT_BINARY_DIR}/include/config/version.h
-  DESTINATION include/config
-)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/include/config/version.h
+        DESTINATION include/config)
 
 install(
   EXPORT config-targets
   NAMESPACE config::
-  DESTINATION lib/cmake/config
-)
+  DESTINATION lib/cmake/config)
 
 configure_package_config_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/configConfig.cmake.in
   ${CMAKE_CURRENT_BINARY_DIR}/configConfig.cmake
-  INSTALL_DESTINATION lib/cmake/config
-)
+  INSTALL_DESTINATION lib/cmake/config)
 
-install(
-  FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/configConfig.cmake
-    ${CMAKE_CURRENT_BINARY_DIR}/configConfigVersion.cmake
-  DESTINATION lib/cmake/config
-)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/configConfig.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/configConfigVersion.cmake
+        DESTINATION lib/cmake/config)
 
-option(BUILD_CONFIG_EXAMPLES "Build the example executable for the config library" ON)
+option(BUILD_CONFIG_EXAMPLES
+       "Build the example executable for the config library" ON)
 if(BUILD_CONFIG_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+option(BUILD_CONFIG_BENCHMARK
+       "Build the benchmark executable for the config library" ON)
+if(BUILD_CONFIG_BENCHMARK)
+  add_subdirectory(benchmark)
 endif()
 
 include(CTest)
