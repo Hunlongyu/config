@@ -1,4 +1,5 @@
 #include <config/config.hpp>
+#include <format>
 #include <iostream>
 
 int main()
@@ -19,16 +20,16 @@ int main()
 
         // 键存在时返回实际值
         auto str = store.get<std::string>("existing_string");
-        std::cout << "existing_string: " << str << std::endl;
+        std::cout << std::format("existing_string: {}\n", str);
 
         // 键不存在时返回类型默认值
         auto missing_str  = store.get<std::string>("missing_string");
         auto missing_int  = store.get<int>("missing_int");
         auto missing_bool = store.get<bool>("missing_bool");
 
-        std::cout << "missing_string: '" << missing_str << "' (空字符串)" << std::endl;
-        std::cout << "missing_int: " << missing_int << " (0)" << std::endl;
-        std::cout << "missing_bool: " << missing_bool << " (false)" << std::endl;
+        std::cout << std::format("missing_string: '{}' (空字符串)\n", missing_str);
+        std::cout << std::format("missing_int: {} (0)\n", missing_int);
+        std::cout << std::format("missing_bool: {} (false)\n", missing_bool);
     }
 
     std::cout << "\n=== ThrowException 策略 ===" << std::endl;
@@ -39,11 +40,11 @@ int main()
         try
         {
             auto str = store.get<std::string>("existing_string");
-            std::cout << "existing_string: " << str << std::endl;
+            std::cout << std::format("existing_string: {}\n", str);
         }
         catch (const std::runtime_error &e)
         {
-            std::cerr << "错误: " << e.what() << std::endl;
+            std::cerr << std::format("错误: {}\n", e.what());
         }
 
         // 键不存在时抛出异常
@@ -54,7 +55,7 @@ int main()
         }
         catch (const std::runtime_error &e)
         {
-            std::cout << "捕获异常: " << e.what() << std::endl;
+            std::cout << std::format("捕获异常: {}\n", e.what());
         }
     }
 
@@ -68,9 +69,9 @@ int main()
         auto port  = store.get<int>("server/port", 8080);
         auto debug = store.get<bool>("debug/enabled", false);
 
-        std::cout << "Theme: " << theme << " (使用默认值)" << std::endl;
-        std::cout << "Port: " << port << " (使用默认值)" << std::endl;
-        std::cout << "Debug: " << debug << " (使用默认值)" << std::endl;
+        std::cout << std::format("Theme: {} (使用默认值)\n", theme);
+        std::cout << std::format("Port: {} (使用默认值)\n", port);
+        std::cout << std::format("Debug: {} (使用默认值)\n", debug);
     }
 
     std::cout << "\n=== 配置验证场景 ===" << std::endl;
@@ -87,11 +88,11 @@ int main()
             try
             {
                 auto value = store.get<std::string>(key);
-                std::cout << "✓ " << key << " = " << value << std::endl;
+                std::cout << std::format("✓ {} = {}\n", key, value);
             }
             catch (const std::runtime_error &e)
             {
-                std::cout << "✗ " << key << " - " << e.what() << std::endl;
+                std::cout << std::format("✗ {} - {}\n", key, e.what());
             }
         }
     }

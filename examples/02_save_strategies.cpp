@@ -1,5 +1,6 @@
 #include <chrono>
 #include <config/config.hpp>
+#include <format>
 #include <iostream>
 
 int main()

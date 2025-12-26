@@ -2,16 +2,19 @@
 
 #include <algorithm>
 #include <atomic>
+#include <concepts>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
-#include <iomanip>
 #include <memory>
 #include <mutex>
+#include <ranges>
 #include <shared_mutex>
-#include <sstream>
+#include <source_location>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -89,24 +92,25 @@ class ObfuscationEngine
 {
     static constexpr char base64_chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    static bool is_base64(const unsigned char c)
+    static constexpr bool is_base64(const unsigned char c)
     {
-        return (isalnum(c) || (c == '+') || (c == '/'));
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (c == '+') || (c == '/');
     }
 
   public:
-    static std::string base64_encode(const std::string &input)
+    static std::string base64_encode(std::string_view input)
     {
         std::string ret;
+        ret.reserve(((input.length() + 2) / 3) * 4);
         int i = 0;
         unsigned char char_array_3[3];
         unsigned char char_array_4[4];
-        const char *bytes_to_encode = input.c_str();
-        size_t in_len               = input.length();
+        auto it       = input.begin();
+        size_t in_len = input.length();
 
         while (in_len--)
         {
-            char_array_3[i++] = *(bytes_to_encode++);
+            char_array_3[i++] = *(it++);
             if (i == 3)
             {
                 char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
@@ -141,7 +145,7 @@ class ObfuscationEngine
         return ret;
     }
 
-    static std::string base64_decode(const std::string &input)
+    static std::string base64_decode(std::string_view input)
     {
         size_t in_len = input.size();
         int i         = 0;
@@ -156,7 +160,7 @@ class ObfuscationEngine
             if (i == 4)
             {
                 for (i = 0; i < 4; i++)
-                    char_array_4[i] = static_cast<unsigned char>(std::string(base64_chars).find(char_array_4[i]));
+                    char_array_4[i] = static_cast<unsigned char>(std::string_view(base64_chars).find(char_array_4[i]));
 
                 char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
                 char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
@@ -175,7 +179,7 @@ class ObfuscationEngine
                 char_array_4[j] = 0;
 
             for (j = 0; j < 4; j++)
-                char_array_4[j] = static_cast<unsigned char>(std::string(base64_chars).find(char_array_4[j]));
+                char_array_4[j] = static_cast<unsigned char>(std::string_view(base64_chars).find(char_array_4[j]));
 
             char_array_3[0] = (char_array_4[0] << 2) + ((char_array_4[1] & 0x30) >> 4);
             char_array_3[1] = ((char_array_4[1] & 0xf) << 4) + ((char_array_4[2] & 0x3c) >> 2);
@@ -188,55 +192,54 @@ class ObfuscationEngine
         return ret;
     }
 
-    static std::string hex_encode(const std::string &input)
+    static std::string hex_encode(std::string_view input)
     {
-        std::stringstream ss;
+        std::string result;
+        result.reserve(input.length() * 2);
         for (const unsigned char c : input)
         {
-            ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+            std::format_to(std::back_inserter(result), "{:02x}", c);
         }
-        return ss.str();
+        return result;
     }
 
-    static std::string hex_decode(const std::string &input)
+    static std::string hex_decode(std::string_view input)
     {
         std::string result;
         if (input.length() % 2 != 0)
             return "";
         for (size_t i = 0; i < input.length(); i += 2)
         {
-            std::string byteString = input.substr(i, 2);
-            const char byte        = static_cast<char>(strtol(byteString.c_str(), nullptr, 16));
+            std::string byteString(input.substr(i, 2));
+            const char byte = static_cast<char>(strtol(byteString.c_str(), nullptr, 16));
             result += byte;
         }
         return result;
     }
 
-    static std::string rot13(const std::string &input)
+    static std::string rot13(std::string_view input)
     {
-        std::string result = input;
-        for (char &c : result)
-        {
+        std::string result;
+        result.reserve(input.size());
+        auto transform_char = [](char c) -> char {
             if (c >= 'a' && c <= 'z')
-            {
-                c = (c - 'a' + 13) % 26 + 'a';
-            }
-            else if (c >= 'A' && c <= 'Z')
-            {
-                c = (c - 'A' + 13) % 26 + 'A';
-            }
-        }
+                return (c - 'a' + 13) % 26 + 'a';
+            if (c >= 'A' && c <= 'Z')
+                return (c - 'A' + 13) % 26 + 'A';
+            return c;
+        };
+        std::ranges::transform(input, std::back_inserter(result), transform_char);
         return result;
     }
 
-    static std::string reverse(const std::string &input)
+    static std::string reverse(std::string_view input)
     {
-        std::string result = input;
+        std::string result(input);
         std::ranges::reverse(result);
         return result;
     }
 
-    static std::string encrypt(const std::string &input, const Obfuscate obf)
+    static std::string encrypt(std::string_view input, const Obfuscate obf)
     {
         switch (obf)
         {
@@ -252,11 +255,11 @@ class ObfuscationEngine
             return reverse(base64_encode(input));
         case Obfuscate::None:
         default:
-            return input;
+            return std::string(input);
         }
     }
 
-    static std::string decrypt(const std::string &input, const Obfuscate obf)
+    static std::string decrypt(std::string_view input, const Obfuscate obf)
     {
         switch (obf)
         {
@@ -272,7 +275,7 @@ class ObfuscationEngine
             return base64_decode(reverse(input));
         case Obfuscate::None:
         default:
-            return input;
+            return std::string(input);
         }
     }
 };
@@ -363,6 +366,18 @@ class PathResolver
 } // namespace detail
 
 /**
+ * @brief Concept to ensure a type can be retrieved from JSON.
+ */
+template <typename T>
+concept JsonReadable = requires(nlohmann::json j) { j.template get<T>(); };
+
+/**
+ * @brief Concept to ensure a type can be written to JSON.
+ */
+template <typename T>
+concept JsonWritable = requires(nlohmann::json j, T v) { j = v; };
+
+/**
  * @brief Thread-safe configuration store managing JSON data persistence and retrieval.
  *
  * Provides thread-safe access to configuration data stored in JSON format.
@@ -429,43 +444,6 @@ class ConfigStore
                 if (type == Obfuscate::None)
                     continue;
 
-                try
-                {
-                    nlohmann::json::json_pointer ptr(key);
-                    if (loaded_data.contains(ptr))
-                    {
-                        auto &val = loaded_data[ptr];
-                        if (val.is_string())
-                        {
-                            val = detail::ObfuscationEngine::decrypt(val.get<std::string>(), type);
-                        }
-                    }
-                    else if (loaded_data.contains(key))
-                    { // Fallback for simple keys if pointer fails? No, ptr handles simple keys too (with /)
-                      // Actually json_pointer constructor handles "key" as is? No, needs "/" prefix usually.
-                      // But nlohmann::json::json_pointer("/key") works.
-                      // Let's assume keys stored in map are valid json pointers or keys.
-                      // If user passes "key", we might store it as "/key" internally or just "key".
-                      // The design example shows "app/name", which implies json pointer syntax but without leading /.
-                      // nlohmann::json::json_pointer needs leading /.
-                    }
-                }
-                catch (...)
-                {
-                }
-            }
-
-            // For simple keys that might not be pointers, we should check.
-            // But let's assume we normalize keys to pointers if they contain separators, or just use json pointer
-            // access always. The previous implementation had `is_json_pointer`.
-
-            // Re-apply deobfuscation more carefully
-            // Actually, simpler approach: Just traverse the map.
-            for (const auto &[key, type] : obfuscation_map_)
-            {
-                if (type == Obfuscate::None)
-                    continue;
-
                 // Try as JSON pointer first (prepend / if needed)
                 std::string ptr_str = (key.front() == '/') ? key : "/" + key;
                 try
@@ -502,21 +480,13 @@ class ConfigStore
         }
     }
 
-    void notify(const std::string &key, [[maybe_unused]] const json &val) const
+    void notify(std::string_view key, [[maybe_unused]] const json &val) const
     {
         for (const auto &l : listeners_)
         {
             // Check if listener key matches or is a parent path
-            // Simple string prefix match for now, or exact match?
-            // Design says: "监听路径前缀" (Listen to path prefix)
             if (key == l.key || key.find(l.key + "/") == 0)
             {
-                // For path listeners, maybe we should pass the sub-object?
-                // Design example: listen "user/profile", set "user/profile/name".
-                // Callback gets "user/profile" value (the whole object) or the changed value?
-                // Design example output: "用户资料变更: {"age":25,"name":"张三"}" when setting name.
-                // So it gets the value AT the listened key.
-
                 try
                 {
                     // Get value at listener's key
@@ -531,9 +501,10 @@ class ConfigStore
         }
     }
 
-    json get_value_at(const std::string &key_or_ptr) const
+    json get_value_at(std::string_view key_or_ptr) const
     {
-        const std::string ptr_str = (key_or_ptr.front() == '/') ? key_or_ptr : "/" + key_or_ptr;
+        const std::string ptr_str =
+            (key_or_ptr.front() == '/') ? std::string(key_or_ptr) : "/" + std::string(key_or_ptr);
         try
         {
             return data_.at(nlohmann::json::json_pointer(ptr_str));
@@ -644,10 +615,12 @@ class ConfigStore
      * @param default_value The value to return if the key is not found.
      * @return The retrieved value or default_value.
      */
-    template <typename T> T get(const std::string &key, const T &default_value) const
+    template <typename T>
+        requires JsonReadable<T>
+    T get(std::string_view key, const T &default_value) const
     {
         std::shared_lock lock(mutex_);
-        if (key.find('/') == std::string::npos)
+        if (key.find('/') == std::string_view::npos)
         {
             auto it = data_.find(key);
             if (it != data_.end())
@@ -664,7 +637,7 @@ class ConfigStore
             return default_value;
         }
 
-        const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+        const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
         const nlohmann::json::json_pointer ptr(ptr_str);
         if (data_.contains(ptr))
         {
@@ -692,10 +665,12 @@ class ConfigStore
      * @return The retrieved value.
      * @throws std::runtime_error If key is missing and strategy is ThrowException.
      */
-    template <typename T> T get(const std::string &key) const
+    template <typename T>
+        requires JsonReadable<T>
+    T get(std::string_view key, const std::source_location location = std::source_location::current()) const
     {
         std::shared_lock lock(mutex_);
-        if (key.find('/') == std::string::npos)
+        if (key.find('/') == std::string_view::npos)
         {
             auto it = data_.find(key);
             if (it != data_.end())
@@ -704,12 +679,13 @@ class ConfigStore
             }
             if (get_strategy_ == GetStrategy::ThrowException)
             {
-                throw std::runtime_error("Key not found: " + key);
+                throw std::runtime_error(std::format("Key not found: {} ({}:{}:{})", key, location.file_name(),
+                                                     location.line(), location.function_name()));
             }
             return T{};
         }
 
-        const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+        const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
         const nlohmann::json::json_pointer ptr(ptr_str);
         if (data_.contains(ptr))
         {
@@ -718,7 +694,8 @@ class ConfigStore
 
         if (get_strategy_ == GetStrategy::ThrowException)
         {
-            throw std::runtime_error("Key not found: " + key);
+            throw std::runtime_error(std::format("Key not found: {} ({}:{}:{})", key, location.file_name(),
+                                                 location.line(), location.function_name()));
         }
         return T{};
     }
@@ -733,31 +710,35 @@ class ConfigStore
      * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
      * @throws std::runtime_error If setting the value fails in memory (e.g., path conflict).
      */
-    template <typename T> bool set(const std::string &key, const T &value, const Obfuscate obf = Obfuscate::None)
+    template <typename T>
+        requires JsonWritable<T>
+    bool set(std::string_view key, const T &value, const Obfuscate obf = Obfuscate::None,
+             const std::source_location location = std::source_location::current())
     {
         {
             std::unique_lock lock(mutex_);
-            const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+            const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
             try
             {
                 data_[nlohmann::json::json_pointer(ptr_str)] = value;
 
                 if (obf != Obfuscate::None)
                 {
-                    obfuscation_map_[key] = obf;
+                    obfuscation_map_[std::string(key)] = obf;
                 }
                 else
                 {
-                    obfuscation_map_.erase(key);
+                    obfuscation_map_.erase(std::string(key));
                 }
             }
             catch (const std::exception &e)
             {
-                throw std::runtime_error(std::string("Config set failed for key '") + key + "': " + e.what());
+                throw std::runtime_error(std::format("Config set failed for key '{}': {} ({}:{}:{})", key, e.what(),
+                                                     location.file_name(), location.line(), location.function_name()));
             }
         }
 
-        notify(key, json(value)); // Notify might need lock adjustment or be careful
+        notify(key, json(value));
 
         if (save_strategy_ == SaveStrategy::Auto)
         {
@@ -771,15 +752,13 @@ class ConfigStore
      * @param key The configuration key or JSON Pointer path to remove.
      * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
      */
-    bool remove(const std::string &key)
+    bool remove(std::string_view key)
     {
         {
             std::unique_lock lock(mutex_);
-            const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+            const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
             try
             {
-                // nlohmann::json doesn't have easy remove by pointer if it's deep?
-                // actually ptr.parent_pointer() and erase
                 const nlohmann::json::json_pointer ptr(ptr_str);
                 if (ptr.empty())
                 { // root
@@ -794,7 +773,7 @@ class ConfigStore
                         parent.erase(ptr.back());
                     }
                 }
-                obfuscation_map_.erase(key);
+                obfuscation_map_.erase(std::string(key));
             }
             catch (...)
             {
@@ -812,10 +791,10 @@ class ConfigStore
      * @param key The configuration key or JSON Pointer path.
      * @return true if the key exists, false otherwise.
      */
-    bool contains(const std::string &key) const
+    bool contains(std::string_view key) const
     {
         std::shared_lock lock(mutex_);
-        const std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+        const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
         return data_.contains(nlohmann::json::json_pointer(ptr_str));
     }
 
@@ -977,12 +956,32 @@ class ConfigStore
     }
 };
 
+namespace detail
+{
+struct StringHash
+{
+    using is_transparent = void;
+    size_t operator()(std::string_view sv) const
+    {
+        return std::hash<std::string_view>{}(sv);
+    }
+    size_t operator()(const std::string &s) const
+    {
+        return std::hash<std::string>{}(s);
+    }
+    size_t operator()(const char *s) const
+    {
+        return std::hash<std::string_view>{}(s);
+    }
+};
+} // namespace detail
+
 // 3.3 全局函数接口
 namespace registry
 {
-inline std::unordered_map<std::string, std::shared_ptr<ConfigStore>> &get_stores()
+inline std::unordered_map<std::string, std::shared_ptr<ConfigStore>, detail::StringHash, std::equal_to<>> &get_stores()
 {
-    static std::unordered_map<std::string, std::shared_ptr<ConfigStore>> stores;
+    static std::unordered_map<std::string, std::shared_ptr<ConfigStore>, detail::StringHash, std::equal_to<>> stores;
     return stores;
 }
 inline std::mutex &get_mutex()
@@ -1004,18 +1003,21 @@ inline std::mutex &get_mutex()
  * @param get_strategy Strategy for handling missing keys.
  * @return Reference to the ConfigStore instance.
  */
-inline ConfigStore &get_store(const std::string &path, Path type = Path::Relative,
+inline ConfigStore &get_store(std::string_view path, Path type = Path::Relative,
                               SaveStrategy save_strategy = SaveStrategy::Auto,
                               GetStrategy get_strategy   = GetStrategy::DefaultValue)
 {
     std::lock_guard<std::mutex> lock(registry::get_mutex());
-    auto &stores          = registry::get_stores();
-    const std::string key = path; // Simplification, unique by path string
-    if (!stores.contains(key))
+    auto &stores = registry::get_stores();
+    auto it      = stores.find(path);
+    if (it == stores.end())
     {
-        stores[key] = std::make_shared<ConfigStore>(path, type, save_strategy, get_strategy);
+        std::string path_str(path);
+        auto [new_it, inserted] =
+            stores.emplace(path_str, std::make_shared<ConfigStore>(path_str, type, save_strategy, get_strategy));
+        return *new_it->second;
     }
-    return *stores[key];
+    return *it->second;
 }
 
 // Global default store helper (internal)
@@ -1056,35 +1058,35 @@ inline GetStrategy get_get_strategy()
 /**
  * @brief Global convenience function: Gets a value from the default store with a default fallback.
  */
-template <typename T> T get(const std::string &key, const T &default_value)
+template <typename T> T get(std::string_view key, const T &default_value)
 {
     return get_default_store().get<T>(key, default_value);
 }
 /**
  * @brief Global convenience function: Gets a value from the default store.
  */
-template <typename T> T get(const std::string &key)
+template <typename T> T get(std::string_view key)
 {
     return get_default_store().get<T>(key);
 }
 /**
  * @brief Global convenience function: Sets a value in the default store.
  */
-template <typename T> bool set(const std::string &key, const T &value, Obfuscate obf = Obfuscate::None)
+template <typename T> bool set(std::string_view key, const T &value, Obfuscate obf = Obfuscate::None)
 {
     return get_default_store().set(key, value, obf);
 }
 /**
  * @brief Global convenience function: Removes a key from the default store.
  */
-inline bool remove(const std::string &key)
+inline bool remove(std::string_view key)
 {
     return get_default_store().remove(key);
 }
 /**
  * @brief Global convenience function: Checks if a key exists in the default store.
  */
-inline bool contains(const std::string &key)
+inline bool contains(std::string_view key)
 {
     return get_default_store().contains(key);
 }

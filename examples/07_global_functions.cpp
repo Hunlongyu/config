@@ -1,4 +1,5 @@
 #include <config/config.hpp>
+#include <format>
 #include <iostream>
 
 int main()
@@ -20,13 +21,13 @@ int main()
     auto app_name = config::get<std::string>("app/name", "Unknown");
     auto port     = config::get<int>("server/port", 8080);
 
-    std::cout << "App: " << app_name << std::endl;
-    std::cout << "Port: " << port << std::endl;
+    std::cout << std::format("App: {}\n", app_name);
+    std::cout << std::format("Port: {}\n", port);
 
     // 检查键
     if (config::contains("server/host"))
     {
-        std::cout << "Host: " << config::get<std::string>("server/host") << std::endl;
+        std::cout << std::format("Host: {}\n", config::get<std::string>("server/host"));
     }
 
     // 删除键
@@ -48,7 +49,7 @@ int main()
     }
     catch (const std::runtime_error &e)
     {
-        std::cout << "捕获异常: " << e.what() << std::endl;
+        std::cout << std::format("捕获异常: {}\n", e.what());
     }
 
     // 设置格式
@@ -56,7 +57,7 @@ int main()
     config::save(config::JsonFormat::Compact);
 
     std::cout << "\n=== 全局配置路径 ===" << std::endl;
-    std::cout << "配置文件: " << config::get_store_path() << std::endl;
+    std::cout << std::format("配置文件: {}\n", config::get_store_path());
 
     std::cout << "\n=== 重新加载配置 ===" << std::endl;
     config::set("before_reload", "value");

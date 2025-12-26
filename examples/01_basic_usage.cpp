@@ -1,4 +1,5 @@
 #include <config/config.hpp>
+#include <format>
 #include <iostream>
 
 int main()
@@ -26,21 +27,21 @@ int main()
     auto port     = store.get<int>("server/port", 3000);
     auto theme    = store.get<std::string>("user/settings/theme", "light");
 
-    std::cout << "App: " << app_name << std::endl;
-    std::cout << "Port: " << port << std::endl;
-    std::cout << "Theme: " << theme << std::endl;
+    std::cout << std::format("App: {}\n", app_name);
+    std::cout << std::format("Port: {}\n", port);
+    std::cout << std::format("Theme: {}\n", theme);
 
     // 5. 检查键是否存在
     if (store.contains("user/profile/name"))
     {
-        std::cout << "用户名: " << store.get<std::string>("user/profile/name") << std::endl;
+        std::cout << std::format("用户名: {}\n", store.get<std::string>("user/profile/name"));
     }
 
     // 6. 删除键
     store.remove("user/settings/theme");
 
     // 7. 获取配置文件路径
-    std::cout << "配置文件位置: " << store.get_store_path() << std::endl;
+    std::cout << std::format("配置文件位置: {}\n", store.get_store_path());
 
     system("pause");
     return 0;

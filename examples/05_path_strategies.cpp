@@ -1,5 +1,6 @@
 #include <config/config.hpp>
 #include <filesystem>
+#include <format>
 #include <iostream>
 
 int main()
@@ -12,7 +13,7 @@ int main()
         auto &store = config::get_store("relative_config.json", config::Path::Relative);
         store.set("path_type", "relative");
 
-        std::cout << "配置文件路径: " << store.get_store_path() << std::endl;
+        std::cout << std::format("配置文件路径: {}\n", store.get_store_path());
         std::cout << "相对于当前工作目录" << std::endl;
     }
 
@@ -26,7 +27,7 @@ int main()
 
         store.set("path_type", "absolute");
 
-        std::cout << "配置文件路径: " << store.get_store_path() << std::endl;
+        std::cout << std::format("配置文件路径: {}\n", store.get_store_path());
         std::cout << "使用绝对路径" << std::endl;
     }
 
@@ -36,7 +37,7 @@ int main()
         store.set("path_type", "appdata");
         store.set("app_name", "MyApp");
 
-        std::cout << "配置文件路径: " << store.get_store_path() << std::endl;
+        std::cout << std::format("配置文件路径: {}\n", store.get_store_path());
         std::cout << "位于系统 AppData 目录 (自动包含程序名以隔离配置)" << std::endl;
 
 #ifdef _WIN32
@@ -68,9 +69,9 @@ int main()
 #endif
         sys_cfg.set("system_wide", true);
 
-        std::cout << "用户配置: " << user_cfg.get_store_path() << std::endl;
-        std::cout << "应用配置: " << app_cfg.get_store_path() << std::endl;
-        std::cout << "系统配置: " << sys_cfg.get_store_path() << std::endl;
+        std::cout << std::format("用户配置: {}\n", user_cfg.get_store_path());
+        std::cout << std::format("应用配置: {}\n", app_cfg.get_store_path());
+        std::cout << std::format("系统配置: {}\n", sys_cfg.get_store_path());
     }
 
     system("pause");

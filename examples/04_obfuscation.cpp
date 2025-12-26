@@ -1,4 +1,5 @@
 #include <config/config.hpp>
+#include <format>
 #include <iostream>
 
 int main()
@@ -31,7 +32,7 @@ int main()
     // 组合混淆
     store.set("password_combined", secret, config::Obfuscate::Combined);
 
-    std::cout << "原始密码: " << secret << std::endl;
+    std::cout << std::format("原始密码: {}\n", secret);
     std::cout << "\n混淆后的存储格式（查看 obfuscated.json）：" << std::endl;
     std::cout << "- None: 明文存储" << std::endl;
     std::cout << "- Base64: 标准 Base64 编码" << std::endl;
@@ -49,18 +50,18 @@ int main()
     auto pwd_reverse  = store.get<std::string>("password_reverse");
     auto pwd_combined = store.get<std::string>("password_combined");
 
-    std::cout << "None:     " << pwd_none << std::endl;
-    std::cout << "Base64:   " << pwd_base64 << std::endl;
-    std::cout << "Hex:      " << pwd_hex << std::endl;
-    std::cout << "ROT13:    " << pwd_rot13 << std::endl;
-    std::cout << "Reverse:  " << pwd_reverse << std::endl;
-    std::cout << "Combined: " << pwd_combined << std::endl;
+    std::cout << std::format("None:     {}\n", pwd_none);
+    std::cout << std::format("Base64:   {}\n", pwd_base64);
+    std::cout << std::format("Hex:      {}\n", pwd_hex);
+    std::cout << std::format("ROT13:    {}\n", pwd_rot13);
+    std::cout << std::format("Reverse:  {}\n", pwd_reverse);
+    std::cout << std::format("Combined: {}\n", pwd_combined);
 
     // 验证所有方式都能正确还原
     bool all_match = (pwd_none == secret) && (pwd_base64 == secret) && (pwd_hex == secret) && (pwd_rot13 == secret) &&
                      (pwd_reverse == secret) && (pwd_combined == secret);
 
-    std::cout << "\n所有混淆方式验证: " << (all_match ? "✓ 通过" : "✗ 失败") << std::endl;
+    std::cout << std::format("\n所有混淆方式验证: {}\n", (all_match ? "✓ 通过" : "✗ 失败"));
 
     std::cout << "\n=== 实际应用场景 ===" << std::endl;
 
