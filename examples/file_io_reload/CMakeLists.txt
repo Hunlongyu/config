@@ -1,3 +1,0 @@
-add_executable(file_io_reload main.cpp)
-target_link_libraries(file_io_reload PRIVATE config)
-set_target_properties(file_io_reload PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

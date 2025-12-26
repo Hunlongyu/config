@@ -16,8 +16,15 @@ option(CONFIG_FETCH_JSON "Automatically fetch nlohmann_json if not found" ON)
 find_package(nlohmann_json QUIET)
 if(NOT nlohmann_json_FOUND AND CONFIG_FETCH_JSON)
   include(FetchContent)
-  FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz)
+  FetchContent_Declare(
+    json
+    GIT_REPOSITORY https://gitee.com/mirrors/nlohmann-json.git
+    GIT_TAG v3.11.3
+  )
   FetchContent_MakeAvailable(json)
+  if(NOT TARGET nlohmann_json::nlohmann_json)
+    add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
+  endif()
 endif()
 
 add_library(config INTERFACE)
@@ -49,10 +56,17 @@ install(
   EXPORT config-targets
 )
 
+if(TARGET nlohmann_json)
+  install(
+    TARGETS nlohmann_json
+    EXPORT config-targets
+  )
+endif()
+
 install(
   DIRECTORY include/
   DESTINATION include
-  FILES_MATCHING PATTERN "*.h"
+  FILES_MATCHING PATTERN "*.hpp"
 )
 
 install(FILES
@@ -82,4 +96,9 @@ install(
 option(BUILD_CONFIG_EXAMPLES "Build the example executable for the config library" ON)
 if(BUILD_CONFIG_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+  add_subdirectory(tests)
 endif()

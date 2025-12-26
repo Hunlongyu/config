@@ -1,3 +1,0 @@
-add_executable(json_pointer_crud main.cpp)
-target_link_libraries(json_pointer_crud PRIVATE config)
-set_target_properties(json_pointer_crud PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

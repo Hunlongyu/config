@@ -1,3 +1,0 @@
-add_executable(path_policies_env main.cpp)
-target_link_libraries(path_policies_env PRIVATE config)
-set_target_properties(path_policies_env PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
