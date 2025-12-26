@@ -23,7 +23,7 @@ jobs:
         if [ "${{ runner.os }}" == "Linux" ]; then
           sudo apt-get update
           sudo apt-get install -y clang-tidy
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}} -DCMAKE_CXX_FLAGS="--coverage" -DCMAKE_EXE_LINKER_FLAGS="--coverage" -DBUILD_CLANG_TIDY=ON
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON -DBUILD_CLANG_TIDY=ON
         else
           cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
         fi
