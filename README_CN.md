@@ -76,6 +76,7 @@ int main() {
 更多详细使用说明，请参考以下文档：
 
 *   **[API 参考文档](docs/API_Reference_CN.md)**: 详细的 API 规范、类方法和枚举说明。
+*   **[使用示例](docs/Examples_CN.md)**: 演示常见用例的代码片段。
 *   **[构建与安装指南](docs/Build_and_Install_CN.md)**: 如何构建示例、运行测试以及集成库的说明。
 
 ## 📄 License

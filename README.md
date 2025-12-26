@@ -76,6 +76,7 @@ int main() {
 For more detailed usage instructions, please refer to the following documents:
 
 *   **[API Reference](docs/API_Reference.md)**: Detailed API specification, class methods, and enumerations.
+*   **[Usage Examples](docs/Examples.md)**: Code snippets demonstrating common use cases.
 *   **[Build & Install Guide](docs/Build_and_Install.md)**: Instructions on how to build examples, run tests, and integrate the library.
 
 ## 📄 License
