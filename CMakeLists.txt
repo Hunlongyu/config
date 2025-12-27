@@ -108,17 +108,20 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/configConfig.cmake
         DESTINATION lib/cmake/config)
 
 option(BUILD_CONFIG_EXAMPLES
-       "Build the example executable for the config library" ON)
+       "Build the example executable for the config library"
+       ${PROJECT_IS_TOP_LEVEL})
 if(BUILD_CONFIG_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
 option(BUILD_CONFIG_BENCHMARK
-       "Build the benchmark executable for the config library" ON)
+       "Build the benchmark executable for the config library"
+       ${PROJECT_IS_TOP_LEVEL})
 if(BUILD_CONFIG_BENCHMARK)
   add_subdirectory(benchmark)
 endif()
 
+option(BUILD_TESTING "Build the testing tree." ${PROJECT_IS_TOP_LEVEL})
 include(CTest)
 if(BUILD_TESTING)
   add_subdirectory(tests)
