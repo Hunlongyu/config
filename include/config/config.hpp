@@ -335,15 +335,14 @@ class PathResolver
 
     static std::filesystem::path get_appdata_path()
     {
+#if defined(CONFIG_TEST_FORCE_FALLBACK_APPDATA)
+        return std::filesystem::current_path();
+#else
         std::filesystem::path app_path;
 #if defined(_WIN32)
         WCHAR buff[MAX_PATH]{};
         bool success = false;
-#if defined(CONFIG_TEST_FORCE_FALLBACK_APPDATA)
-        success = false;
-#else
-        success = SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, buff));
-#endif
+        success      = SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, buff));
         if (success)
         {
             app_path = std::filesystem::path(std::wstring(buff)) / get_program_name();
@@ -369,6 +368,7 @@ class PathResolver
             app_path = std::filesystem::current_path();
 #endif
         return app_path;
+#endif
     }
 
     static std::string resolve(const std::string &path, const Path type)
