@@ -205,13 +205,14 @@ class ObfuscationEngine
     static std::string hex_decode(std::string_view input)
     {
         std::string result;
-        if (input.length() % 2 != 0)
-            return "";
-        for (size_t i = 0; i < input.length(); i += 2)
+        if (input.length() % 2 == 0)
         {
-            std::string byteString(input.substr(i, 2));
-            const char byte = static_cast<char>(strtol(byteString.c_str(), nullptr, 16));
-            result += byte;
+            for (size_t i = 0; i < input.length(); i += 2)
+            {
+                std::string byteString(input.substr(i, 2));
+                const char byte = static_cast<char>(strtol(byteString.c_str(), nullptr, 16));
+                result += byte;
+            }
         }
         return result;
     }
@@ -240,42 +241,58 @@ class ObfuscationEngine
 
     static std::string encrypt(std::string_view input, const Obfuscate obf)
     {
+        std::string result;
         switch (obf)
         {
         case Obfuscate::Base64:
-            return base64_encode(input);
+            result = base64_encode(input);
+            break;
         case Obfuscate::Hex:
-            return hex_encode(input);
+            result = hex_encode(input);
+            break;
         case Obfuscate::ROT13:
-            return rot13(input);
+            result = rot13(input);
+            break;
         case Obfuscate::Reverse:
-            return reverse(input);
+            result = reverse(input);
+            break;
         case Obfuscate::Combined:
-            return reverse(base64_encode(input));
+            result = reverse(base64_encode(input));
+            break;
         case Obfuscate::None:
         default:
-            return std::string(input);
+            result = std::string(input);
+            break;
         }
+        return result;
     }
 
     static std::string decrypt(std::string_view input, const Obfuscate obf)
     {
+        std::string result;
         switch (obf)
         {
         case Obfuscate::Base64:
-            return base64_decode(input);
+            result = base64_decode(input);
+            break;
         case Obfuscate::Hex:
-            return hex_decode(input);
+            result = hex_decode(input);
+            break;
         case Obfuscate::ROT13:
-            return rot13(input); // ROT13 is symmetric
+            result = rot13(input); // ROT13 is symmetric
+            break;
         case Obfuscate::Reverse:
-            return reverse(input); // Reverse is symmetric
+            result = reverse(input); // Reverse is symmetric
+            break;
         case Obfuscate::Combined:
-            return base64_decode(reverse(input));
+            result = base64_decode(reverse(input));
+            break;
         case Obfuscate::None:
         default:
-            return std::string(input);
+            result = std::string(input);
+            break;
         }
+        return result;
     }
 };
 
@@ -284,13 +301,16 @@ class PathResolver
   public:
     static std::string get_program_name()
     {
-#if defined(_WIN32)
+        std::string name = "config_app";
+#if defined(CONFIG_TEST_FORCE_FALLBACK_PROGNAME)
+        // Fallback testing mode: skip platform-specific logic
+#elif defined(_WIN32)
         char module_path[MAX_PATH]{};
         const DWORD r = GetModuleFileNameA(nullptr, module_path, MAX_PATH);
         if (r > 0 && r < MAX_PATH)
         {
             const std::filesystem::path p(module_path);
-            return p.stem().string();
+            name = p.stem().string();
         }
 #elif defined(__APPLE__)
         char buf[4096];
@@ -298,7 +318,7 @@ class PathResolver
         if (_NSGetExecutablePath(buf, &size) == 0)
         {
             std::filesystem::path p(buf);
-            return p.stem().string();
+            name = p.stem().string();
         }
 #elif defined(__linux__)
         char buf[PATH_MAX];
@@ -307,58 +327,73 @@ class PathResolver
         {
             buf[len] = '\0';
             std::filesystem::path p(buf);
-            return p.stem().string();
+            name = p.stem().string();
         }
 #endif
-        return "config_app";
+        return name;
     }
 
     static std::filesystem::path get_appdata_path()
     {
+        std::filesystem::path app_path;
 #if defined(_WIN32)
         WCHAR buff[MAX_PATH]{};
-        if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, buff)))
+        bool success = false;
+#if defined(CONFIG_TEST_FORCE_FALLBACK_APPDATA)
+        success = false;
+#else
+        success = SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, buff));
+#endif
+        if (success)
         {
-            return std::filesystem::path(std::wstring(buff)) / get_program_name();
+            app_path = std::filesystem::path(std::wstring(buff)) / get_program_name();
         }
-        // Fallbacks...
-        return std::filesystem::current_path();
+        else
+        {
+            app_path = std::filesystem::current_path();
+        }
 #elif defined(__APPLE__)
         const char *home = std::getenv("HOME");
         if (home)
-            return std::filesystem::path(home) / "Library" / "Application Support" / get_program_name();
-        return std::filesystem::current_path();
+            app_path = std::filesystem::path(home) / "Library" / "Application Support" / get_program_name();
+        else
+            app_path = std::filesystem::current_path();
 #else
-        const char *xdg = std::getenv("XDG_CONFIG_HOME");
-        if (xdg)
-            return std::filesystem::path(xdg) / get_program_name();
+        const char *xdg  = std::getenv("XDG_CONFIG_HOME");
         const char *home = std::getenv("HOME");
-        if (home)
-            return std::filesystem::path(home) / ".config" / get_program_name();
-        return std::filesystem::current_path();
+        if (xdg)
+            app_path = std::filesystem::path(xdg) / get_program_name();
+        else if (home)
+            app_path = std::filesystem::path(home) / ".config" / get_program_name();
+        else
+            app_path = std::filesystem::current_path();
 #endif
+        return app_path;
     }
 
     static std::string resolve(const std::string &path, const Path type)
     {
         const std::filesystem::path p(path);
+        std::string result;
+        std::filesystem::path app_data;
 
         switch (type)
         {
-        case Path::Absolute:
-            return std::filesystem::absolute(p).string();
-        case Path::AppData: {
-            const auto app_data = get_appdata_path();
+        case Path::AppData:
+            app_data = get_appdata_path();
             if (!std::filesystem::exists(app_data))
             {
                 std::filesystem::create_directories(app_data);
             }
-            return (app_data / p).string();
-        }
+            result = (app_data / p).string();
+            break;
+        case Path::Absolute:
         case Path::Relative:
         default:
-            return std::filesystem::absolute(p).string();
+            result = std::filesystem::absolute(p).string();
+            break;
         }
+        return result;
     }
 };
 
@@ -414,62 +449,64 @@ class ConfigStore
 
     void load()
     {
-        if (!std::filesystem::exists(file_path_))
+        if (std::filesystem::exists(file_path_))
         {
-            data_ = json::object();
-            return;
-        }
-
-        try
-        {
-            std::ifstream file(file_path_);
-            json loaded_data;
-            file >> loaded_data;
-
-            if (loaded_data.contains(META_OBFUSCATION_KEY))
+            try
             {
-                auto meta = loaded_data[META_OBFUSCATION_KEY];
-                for (auto &[key, val] : meta.items())
-                {
-                    obfuscation_map_[key] = static_cast<Obfuscate>(val.get<int>());
-                }
-                loaded_data.erase(META_OBFUSCATION_KEY);
-            }
+                std::ifstream file(file_path_);
+                json loaded_data;
+                file >> loaded_data;
 
-            for (const auto &[key, type] : obfuscation_map_)
-            {
-                if (type == Obfuscate::None)
-                    continue;
-
-                std::string ptr_str = (key.front() == '/') ? key : "/" + key;
-                try
+                if (loaded_data.contains(META_OBFUSCATION_KEY))
                 {
-                    nlohmann::json::json_pointer ptr(ptr_str);
-                    if (loaded_data.contains(ptr))
+                    auto meta = loaded_data[META_OBFUSCATION_KEY];
+                    for (auto &[key, val] : meta.items())
                     {
-                        auto &val = loaded_data[ptr];
-                        if (val.is_string())
+                        obfuscation_map_[key] = static_cast<Obfuscate>(val.get<int>());
+                    }
+                    loaded_data.erase(META_OBFUSCATION_KEY);
+                }
+
+                for (const auto &[key, type] : obfuscation_map_)
+                {
+                    if (type == Obfuscate::None)
+                        continue;
+
+                    std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+                    try
+                    {
+                        nlohmann::json::json_pointer ptr(ptr_str);
+                        if (loaded_data.contains(ptr))
                         {
-                            val = detail::ObfuscationEngine::decrypt(val.get<std::string>(), type);
+                            auto &val = loaded_data[ptr];
+                            if (val.is_string())
+                            {
+                                val = detail::ObfuscationEngine::decrypt(val.get<std::string>(), type);
+                            }
+                        }
+                    }
+                    catch (...)
+                    {
+                        // std::cout << "Caught exception for key: " << key << std::endl;
+                        if (loaded_data.contains(key))
+                        {
+                            auto &val = loaded_data[key];
+                            if (val.is_string())
+                            {
+                                val = detail::ObfuscationEngine::decrypt(val.get<std::string>(), type);
+                            }
                         }
                     }
                 }
-                catch (...)
-                {
-                    if (loaded_data.contains(key))
-                    {
-                        auto &val = loaded_data[key];
-                        if (val.is_string())
-                        {
-                            val = detail::ObfuscationEngine::decrypt(val.get<std::string>(), type);
-                        }
-                    }
-                }
-            }
 
-            data_ = loaded_data;
+                data_ = loaded_data;
+            }
+            catch (...)
+            {
+                data_ = json::object();
+            }
         }
-        catch (...)
+        else
         {
             data_ = json::object();
         }
@@ -496,20 +533,23 @@ class ConfigStore
 
     json get_value_at(std::string_view key_or_ptr) const
     {
-        if (key_or_ptr.empty())
-        {
-            return data_;
-        }
+        std::shared_lock lock(mutex_);
+        // key_or_ptr is guaranteed to be non-empty by caller (notify) logic.
         const std::string ptr_str =
             (key_or_ptr.front() == '/') ? std::string(key_or_ptr) : "/" + std::string(key_or_ptr);
+        json result;
         try
         {
-            return data_.at(nlohmann::json::json_pointer(ptr_str));
+#if defined(CONFIG_TEST_FORCE_GET_VALUE_EXCEPTION)
+            throw std::runtime_error("Forced exception");
+#endif
+            result = data_.at(nlohmann::json::json_pointer(ptr_str));
         }
         catch (...)
         {
-            return json();
+            result = json();
         }
+        return result;
     }
 
   public:
@@ -621,22 +661,6 @@ class ConfigStore
         {
             return default_value;
         }
-        if (key.find('/') == std::string_view::npos)
-        {
-            auto it = data_.find(key);
-            if (it != data_.end())
-            {
-                try
-                {
-                    return it->get<T>();
-                }
-                catch (...)
-                {
-                    return default_value;
-                }
-            }
-            return default_value;
-        }
 
         const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
         const nlohmann::json::json_pointer ptr(ptr_str);
@@ -648,7 +672,7 @@ class ConfigStore
             }
             catch (...)
             {
-                return default_value;
+                // Fallthrough to return default_value
             }
         }
         return default_value;
@@ -674,27 +698,6 @@ class ConfigStore
         std::shared_lock lock(mutex_);
         if (key.empty())
         {
-            if (get_strategy_ == GetStrategy::ThrowException)
-            {
-                throw std::runtime_error(std::format("Key not found: {} ({}:{}:{})", key, location.file_name(),
-                                                     location.line(), location.function_name()));
-            }
-            return T{};
-        }
-        if (key.find('/') == std::string_view::npos)
-        {
-            auto it = data_.find(key);
-            if (it != data_.end())
-            {
-                try
-                {
-                    return it->get<T>();
-                }
-                catch (...)
-                {
-                    // Type mismatch: treat as missing key / default value case
-                }
-            }
             if (get_strategy_ == GetStrategy::ThrowException)
             {
                 throw std::runtime_error(std::format("Key not found: {} ({}:{}:{})", key, location.file_name(),
@@ -745,6 +748,8 @@ class ConfigStore
         {
             return false;
         }
+
+        std::string error_msg;
         {
             std::unique_lock lock(mutex_);
             const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
@@ -763,18 +768,24 @@ class ConfigStore
             }
             catch (const std::exception &e)
             {
-                throw std::runtime_error(std::format("Config set failed for key '{}': {} ({}:{}:{})", key, e.what(),
-                                                     location.file_name(), location.line(), location.function_name()));
+                error_msg = std::format("Config set failed for key '{}': {} ({}:{}:{})", key, e.what(),
+                                        location.file_name(), location.line(), location.function_name());
             }
+        }
+
+        if (!error_msg.empty())
+        {
+            throw std::runtime_error(error_msg);
         }
 
         notify(key, json(value));
 
+        bool result = true;
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            return save();
+            result = save();
         }
-        return true;
+        return result;
     }
 
     /**
@@ -812,11 +823,12 @@ class ConfigStore
             {
             }
         }
+        bool result = true;
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            return save();
+            result = save();
         }
-        return true;
+        return result;
     }
 
     /**
@@ -826,13 +838,14 @@ class ConfigStore
      */
     bool contains(std::string_view key) const
     {
+        bool result = false;
         std::shared_lock lock(mutex_);
-        if (key.empty())
+        if (!key.empty())
         {
-            return false;
+            const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
+            result                    = data_.contains(nlohmann::json::json_pointer(ptr_str));
         }
-        const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
-        return data_.contains(nlohmann::json::json_pointer(ptr_str));
+        return result;
     }
 
     /**
@@ -851,6 +864,7 @@ class ConfigStore
      */
     bool save(JsonFormat format) const
     {
+        bool result = false;
         json save_data;
         std::unordered_map<std::string, Obfuscate> obf_map_copy;
 
@@ -867,66 +881,59 @@ class ConfigStore
             {
                 std::filesystem::create_directories(p.parent_path());
             }
-        }
-        catch (...)
-        {
-            return false;
-        }
 
-        if (!obf_map_copy.empty())
-        {
-            for (const auto &[key, type] : obf_map_copy)
+            if (!obf_map_copy.empty())
             {
-                if (type == Obfuscate::None)
-                    continue;
-
-                std::string ptr_str = (key.front() == '/') ? key : "/" + key;
-                try
+                for (const auto &[key, type] : obf_map_copy)
                 {
-                    nlohmann::json::json_pointer ptr(ptr_str);
-                    if (save_data.contains(ptr))
+                    if (type == Obfuscate::None)
+                        continue;
+
+                    std::string ptr_str = (key.front() == '/') ? key : "/" + key;
+                    try
                     {
-                        auto &val = save_data[ptr];
-                        if (val.is_string())
+                        nlohmann::json::json_pointer ptr(ptr_str);
+                        if (save_data.contains(ptr))
                         {
-                            val = detail::ObfuscationEngine::encrypt(val.get<std::string>(), type);
+                            auto &val = save_data[ptr];
+                            if (val.is_string())
+                            {
+                                val = detail::ObfuscationEngine::encrypt(val.get<std::string>(), type);
+                            }
                         }
                     }
+                    catch (...)
+                    {
+                    }
                 }
-                catch (...)
+
+                json meta;
+                for (const auto &[key, val] : obf_map_copy)
                 {
+                    meta[key] = static_cast<int>(val);
                 }
+                save_data[META_OBFUSCATION_KEY] = meta;
             }
 
-            json meta;
-            for (const auto &[key, val] : obf_map_copy)
-            {
-                meta[key] = static_cast<int>(val);
-            }
-            save_data[META_OBFUSCATION_KEY] = meta;
-        }
-
-        try
-        {
             std::ofstream file(file_path_);
-            if (!file.is_open())
+            if (file.is_open())
             {
-                return false;
+                if (format == JsonFormat::Pretty)
+                {
+                    file << save_data.dump(4);
+                }
+                else
+                {
+                    file << save_data.dump();
+                }
+                result = file.good();
             }
-            if (format == JsonFormat::Pretty)
-            {
-                file << save_data.dump(4);
-            }
-            else
-            {
-                file << save_data.dump();
-            }
-            return file.good();
         }
         catch (...)
         {
-            return false;
+            result = false;
         }
+        return result;
     }
 
     /**
@@ -951,11 +958,12 @@ class ConfigStore
             data_.clear();
             obfuscation_map_.clear();
         }
+        bool result = true;
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            return save();
+            result = save();
         }
-        return true;
+        return result;
     }
 
     /**
@@ -1047,7 +1055,7 @@ inline ConfigStore &get_store(std::string_view path, Path type = Path::Relative,
         std::string path_str(path);
         auto [new_it, inserted] =
             stores.emplace(path_str, std::make_shared<ConfigStore>(path_str, type, save_strategy, get_strategy));
-        return *new_it->second;
+        it = new_it;
     }
     return *it->second;
 }

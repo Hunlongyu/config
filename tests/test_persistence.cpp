@@ -150,3 +150,124 @@ TEST_F(PersistenceTest, AppDataPath)
     auto store = std::make_unique<config::ConfigStore>(filename, config::Path::AppData);
     std::filesystem::remove(store->get_store_path());
 }
+
+// 6. Load Corrupted JSON
+TEST_F(PersistenceTest, LoadCorruptedJson)
+{
+    // Write invalid JSON
+    {
+        std::ofstream file("test_bad.json");
+        file << "{ \"key\": \"value\" "; // Missing closing brace
+    }
+
+    // Should catch exception and initialize empty
+    auto store = std::make_unique<config::ConfigStore>("test_bad.json");
+    EXPECT_FALSE(store->contains("key"));
+
+    if (std::filesystem::exists("test_bad.json"))
+        std::filesystem::remove("test_bad.json");
+}
+
+// 7. Save Failure (Invalid Path)
+TEST_F(PersistenceTest, SaveFailure)
+{
+    // Use a directory path as file path to trigger open failure
+    auto store = std::make_unique<config::ConfigStore>("persistence_test_dir/");
+    store->set("key", "value");
+
+    // Save should fail safely return false
+    EXPECT_FALSE(store->save());
+}
+
+// 8. Save Directory Creation Failure (Coverage)
+TEST_F(PersistenceTest, SaveMkdirFailure)
+{
+    // Create a file "blocker"
+    {
+        std::ofstream f("blocker");
+        f << "data";
+    }
+
+    // Try to save to "blocker/file.json". "blocker" exists as file, so mkdir should fail.
+    // Note: On Windows, mkdir on existing file fails.
+    auto store = std::make_unique<config::ConfigStore>("blocker/file.json");
+    store->set("key", "val");
+    EXPECT_FALSE(store->save());
+
+    std::filesystem::remove("blocker");
+}
+
+// 9. PathResolver Invalid Enum (Coverage)
+TEST_F(PersistenceTest, PathResolverInvalid)
+{
+    // Cast invalid int to Path enum
+    // This tests the default case in PathResolver::resolve
+    // Note: We need to access private/internal detail or use public API that calls it.
+    // ConfigStore calls resolve in constructor.
+    auto store = std::make_unique<config::ConfigStore>("test.json", (config::Path)99);
+    // Should default to absolute path
+    EXPECT_FALSE(store->get_store_path().empty());
+
+    // Test resolve with invalid enum (Defensive coverage)
+    // Access resolve directly? No, it's private.
+    // But we already triggered it via constructor above.
+    // The default case in switch(type) inside resolve() handles it.
+}
+
+// 10. PathResolver Enum Coverage (Additional)
+TEST_F(PersistenceTest, PathResolverEnumCoverage)
+{
+    // Explicitly test Path::Absolute and Path::Relative cases via constructor
+    {
+        config::ConfigStore s1("test_abs.json", config::Path::Absolute);
+        EXPECT_FALSE(s1.get_store_path().empty());
+    }
+    {
+        config::ConfigStore s2("test_rel.json", config::Path::Relative);
+        EXPECT_FALSE(s2.get_store_path().empty());
+    }
+
+    // Path::AppData is tested in main tests, but let's double check coverage
+    // if we can mock or just run it (it might create dirs).
+    // The previous tests likely covered it.
+
+    // Test Invalid Path Enum explicitly again just to be sure
+    {
+        config::ConfigStore s3("test_inv.json", static_cast<config::Path>(999));
+        // Should fallback to absolute/current path logic
+        EXPECT_FALSE(s3.get_store_path().empty());
+    }
+}
+
+// 11. PathResolver AppData Creation
+TEST_F(PersistenceTest, AppDataCreation)
+{
+    // To test create_directories, we need get_appdata_path() to return a path that does NOT exist.
+    // get_appdata_path() returns AppData/Roaming/config_app (on Windows).
+    // This directory likely exists because other tests ran before.
+
+    // Strategy:
+    // 1. Get the appdata path manually (we can't access private get_appdata_path).
+    // 2. But we can deduce it from a store with Path::AppData.
+    config::ConfigStore store("dummy.json", config::Path::AppData);
+    std::filesystem::path full_path(store.get_store_path());
+    std::filesystem::path app_data_dir = full_path.parent_path();
+
+    // 3. Remove the directory if it exists.
+    // SAFETY CHECK: Ensure we are ONLY deleting the test executable's own directory.
+    // We check that the directory name matches the executable name (test_persistence).
+    if (std::filesystem::exists(app_data_dir))
+    {
+        // Double check to prevent any accidental deletion of important system folders
+        if (app_data_dir.filename().string().find("test_persistence") != std::string::npos)
+        {
+            std::filesystem::remove_all(app_data_dir);
+        }
+    }
+
+    // 4. Create a new store with Path::AppData. This should trigger create_directories.
+    config::ConfigStore store2("dummy.json", config::Path::AppData);
+
+    // 5. Verify it exists now.
+    EXPECT_TRUE(std::filesystem::exists(app_data_dir));
+}
