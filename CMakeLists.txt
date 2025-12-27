@@ -50,6 +50,7 @@ if(NOT nlohmann_json_FOUND AND CONFIG_FETCH_JSON)
     GIT_REPOSITORY https://gitee.com/mirrors/nlohmann-json.git
     GIT_TAG v3.11.3)
   FetchContent_MakeAvailable(json)
+  set(CONFIG_OWNS_JSON ON)
   if(NOT TARGET nlohmann_json::nlohmann_json)
     add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
   endif()
@@ -80,7 +81,7 @@ write_basic_package_version_file(
 
 install(TARGETS config EXPORT config-targets)
 
-if(TARGET nlohmann_json)
+if(CONFIG_OWNS_JSON)
   install(TARGETS nlohmann_json EXPORT config-targets)
 endif()
 
