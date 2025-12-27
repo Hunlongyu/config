@@ -368,7 +368,7 @@ class PathResolver
  * @brief Concept to ensure a type can be retrieved from JSON.
  */
 template <typename T>
-concept JsonReadable = requires(nlohmann::json j) { j.template get<T>(); };
+concept JsonReadable = requires(nlohmann::json j) { j.get<T>(); };
 
 /**
  * @brief Concept to ensure a type can be written to JSON.
@@ -663,6 +663,7 @@ class ConfigStore
      *
      * @tparam T Type of the value to retrieve.
      * @param key The configuration key or JSON Pointer path.
+     * @param location
      * @return The retrieved value.
      * @throws std::runtime_error If key is missing and strategy is ThrowException.
      */
@@ -685,7 +686,14 @@ class ConfigStore
             auto it = data_.find(key);
             if (it != data_.end())
             {
-                return it->get<T>();
+                try
+                {
+                    return it->get<T>();
+                }
+                catch (...)
+                {
+                    // Type mismatch: treat as missing key / default value case
+                }
             }
             if (get_strategy_ == GetStrategy::ThrowException)
             {
@@ -699,7 +707,14 @@ class ConfigStore
         const nlohmann::json::json_pointer ptr(ptr_str);
         if (data_.contains(ptr))
         {
-            return data_.at(ptr).get<T>();
+            try
+            {
+                return data_.at(ptr).get<T>();
+            }
+            catch (...)
+            {
+                // Type mismatch: treat as missing key / default value case
+            }
         }
 
         if (get_strategy_ == GetStrategy::ThrowException)
@@ -717,6 +732,7 @@ class ConfigStore
      * @param key The configuration key or JSON Pointer path.
      * @param value The value to store.
      * @param obf Obfuscation method to apply (optional).
+     * @param location
      * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
      * @throws std::runtime_error If setting the value fails in memory (e.g., path conflict).
      */

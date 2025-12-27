@@ -1,84 +1,120 @@
 #include <config/config.hpp>
+#include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
 
 class ObfuscationTest : public ::testing::Test
 {
   protected:
-    void SetUp() override
-    {
-        store       = std::make_unique<config::ConfigStore>("test_obf.json");
-        test_string = "TestSecret123!@#";
-    }
-
     void TearDown() override
     {
-        std::filesystem::remove("test_obf.json");
+        if (std::filesystem::exists("test_obf.json"))
+            std::filesystem::remove("test_obf.json");
     }
-
-    std::unique_ptr<config::ConfigStore> store;
-    std::string test_string;
 };
 
-// Base64 混淆
-TEST_F(ObfuscationTest, Base64Obfuscation)
+// 1. Standard Algorithms
+TEST_F(ObfuscationTest, StandardAlgorithms)
 {
-    store->set("pwd", test_string, config::Obfuscate::Base64);
-    EXPECT_EQ(store->get<std::string>("pwd"), test_string);
+    auto store         = std::make_unique<config::ConfigStore>("test_obf.json");
+    std::string secret = "Secret123";
+
+    store->set("b64", secret, config::Obfuscate::Base64);
+    store->set("hex", secret, config::Obfuscate::Hex);
+    store->set("rot", secret, config::Obfuscate::ROT13);
+    store->set("rev", secret, config::Obfuscate::Reverse);
+    store->set("comb", secret, config::Obfuscate::Combined);
+
+    // Verify retrieval (decryption)
+    EXPECT_EQ(store->get<std::string>("b64"), secret);
+    EXPECT_EQ(store->get<std::string>("hex"), secret);
+    EXPECT_EQ(store->get<std::string>("rot"), secret);
+    EXPECT_EQ(store->get<std::string>("rev"), secret);
+    EXPECT_EQ(store->get<std::string>("comb"), secret);
 }
 
-// Hex 混淆
-TEST_F(ObfuscationTest, HexObfuscation)
+// 2. Base64 Padding Boundaries (Enhanced)
+TEST_F(ObfuscationTest, Base64Padding)
 {
-    store->set("pwd", test_string, config::Obfuscate::Hex);
-    EXPECT_EQ(store->get<std::string>("pwd"), test_string);
+    auto store = std::make_unique<config::ConfigStore>("test_obf.json");
+
+    // Length % 3 == 0 (0 padding)
+    std::string p0 = "abc";
+    store->set("p0", p0, config::Obfuscate::Base64);
+
+    // Length % 3 == 2 (1 padding '=')
+    std::string p1 = "abcde";
+    store->set("p1", p1, config::Obfuscate::Base64);
+
+    // Length % 3 == 1 (2 padding '==')
+    std::string p2 = "abcd";
+    store->set("p2", p2, config::Obfuscate::Base64);
+
+    store->save();
+
+    // Reload and check
+    {
+        auto store2 = std::make_unique<config::ConfigStore>("test_obf.json");
+        EXPECT_EQ(store2->get<std::string>("p0"), p0);
+        EXPECT_EQ(store2->get<std::string>("p1"), p1);
+        EXPECT_EQ(store2->get<std::string>("p2"), p2);
+    }
 }
 
-// ROT13 混淆
-TEST_F(ObfuscationTest, ROT13Obfuscation)
+// 3. Malformed Hex (Enhanced)
+TEST_F(ObfuscationTest, MalformedHex)
 {
-    store->set("pwd", test_string, config::Obfuscate::ROT13);
-    EXPECT_EQ(store->get<std::string>("pwd"), test_string);
+    // Write a file with invalid hex manually
+    {
+        std::ofstream file("test_obf.json");
+        file << R"({
+            "bad_hex": "ZZ",
+            "odd_hex": "ABC",
+            "__obfuscate_meta__": {
+                "bad_hex": 2,
+                "odd_hex": 2
+            }
+        })";
+    }
+    // Hex enum value is 2
+
+    auto store = std::make_unique<config::ConfigStore>("test_obf.json");
+
+    // "ZZ" is not hex. strtol returns 0. So likely "\0"
+    std::string bad = store->get<std::string>("bad_hex");
+    EXPECT_FALSE(bad.empty()); // Contains \0
+    EXPECT_EQ(bad[0], '\0');
+
+    // "ABC" is odd length. Implementation returns empty string
+    std::string odd = store->get<std::string>("odd_hex");
+    EXPECT_TRUE(odd.empty());
 }
 
-// Reverse 混淆
-TEST_F(ObfuscationTest, ReverseObfuscation)
+// 4. Empty Strings
+TEST_F(ObfuscationTest, EmptyStrings)
 {
-    store->set("pwd", test_string, config::Obfuscate::Reverse);
-    EXPECT_EQ(store->get<std::string>("pwd"), test_string);
+    auto store = std::make_unique<config::ConfigStore>("test_obf.json");
+    store->set("empty", "", config::Obfuscate::Base64);
+    EXPECT_EQ(store->get<std::string>("empty"), "");
+
+    store->save();
+
+    auto store2 = std::make_unique<config::ConfigStore>("test_obf.json");
+    EXPECT_EQ(store2->get<std::string>("empty"), "");
 }
 
-// Combined 混淆
-TEST_F(ObfuscationTest, CombinedObfuscation)
-{
-    store->set("pwd", test_string, config::Obfuscate::Combined);
-    EXPECT_EQ(store->get<std::string>("pwd"), test_string);
-}
-
-// 持久化测试
-TEST_F(ObfuscationTest, ObfuscationPersistence)
+// 5. Persistence of Obfuscation Meta
+TEST_F(ObfuscationTest, MetaPersistence)
 {
     {
-        auto &s = config::get_store("persist_obf.json");
-        s.set("secret", test_string, config::Obfuscate::Combined);
+        auto store = std::make_unique<config::ConfigStore>("test_obf.json");
+        store->set("key", "val", config::Obfuscate::ROT13);
+        store->save();
     }
 
-    // 重新加载
-    {
-        auto &s = config::get_store("persist_obf.json");
-        EXPECT_EQ(s.get<std::string>("secret"), test_string);
-    }
-
-    std::filesystem::remove("persist_obf.json");
-}
-
-// 多种混淆同时存在
-TEST_F(ObfuscationTest, MultipleObfuscationTypes)
-{
-    store->set("b64", "value1", config::Obfuscate::Base64);
-    store->set("hex", "value2", config::Obfuscate::Hex);
-    store->set("rot", "value3", config::Obfuscate::ROT13);
-
-    EXPECT_EQ(store->get<std::string>("b64"), "value1");
-    EXPECT_EQ(store->get<std::string>("hex"), "value2");
-    EXPECT_EQ(store->get<std::string>("rot"), "value3");
+    // Verify file content has __obfuscate_meta__
+    std::ifstream file("test_obf.json");
+    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    EXPECT_TRUE(content.find("__obfuscate_meta__") != std::string::npos);
+    EXPECT_TRUE(content.find("\"key\":") != std::string::npos); // Meta should contain the key mapping
 }
