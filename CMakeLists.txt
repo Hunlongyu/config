@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.28)
 
 project(
   config
-  VERSION 0.1.1
+  VERSION 0.1.2
   LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -31,8 +31,10 @@ endif()
 if(ENABLE_COVERAGE)
   if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     message(STATUS "Coverage enabled")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g --coverage -fprofile-update=atomic")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O0 -g --coverage -fprofile-update=atomic")
+    set(CMAKE_CXX_FLAGS
+        "${CMAKE_CXX_FLAGS} -O0 -g --coverage -fprofile-update=atomic")
+    set(CMAKE_C_FLAGS
+        "${CMAKE_C_FLAGS} -O0 -g --coverage -fprofile-update=atomic")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} --coverage")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} --coverage")
   endif()

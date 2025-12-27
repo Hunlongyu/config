@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <concepts>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -358,7 +357,7 @@ class PathResolver
         }
         case Path::Relative:
         default:
-            return std::filesystem::absolute(p).string(); // Relative to CWD, made absolute for storage
+            return std::filesystem::absolute(p).string();
         }
     }
 };
@@ -427,7 +426,6 @@ class ConfigStore
             json loaded_data;
             file >> loaded_data;
 
-            // Handle Obfuscation
             if (loaded_data.contains(META_OBFUSCATION_KEY))
             {
                 auto meta = loaded_data[META_OBFUSCATION_KEY];
@@ -438,13 +436,11 @@ class ConfigStore
                 loaded_data.erase(META_OBFUSCATION_KEY);
             }
 
-            // Deobfuscate values
             for (const auto &[key, type] : obfuscation_map_)
             {
                 if (type == Obfuscate::None)
                     continue;
 
-                // Try as JSON pointer first (prepend / if needed)
                 std::string ptr_str = (key.front() == '/') ? key : "/" + key;
                 try
                 {
@@ -460,7 +456,6 @@ class ConfigStore
                 }
                 catch (...)
                 {
-                    // Try as direct key if pointer fails
                     if (loaded_data.contains(key))
                     {
                         auto &val = loaded_data[key];
@@ -484,12 +479,10 @@ class ConfigStore
     {
         for (const auto &l : listeners_)
         {
-            // Check if listener key matches or is a parent path
             if (key == l.key || key.find(l.key + "/") == 0)
             {
                 try
                 {
-                    // Get value at listener's key
                     std::string ptr_str = (l.key.front() == '/') ? l.key : "/" + l.key;
                     auto v              = get_value_at(ptr_str);
                     l.callback(v);
@@ -503,6 +496,10 @@ class ConfigStore
 
     json get_value_at(std::string_view key_or_ptr) const
     {
+        if (key_or_ptr.empty())
+        {
+            return data_;
+        }
         const std::string ptr_str =
             (key_or_ptr.front() == '/') ? std::string(key_or_ptr) : "/" + std::string(key_or_ptr);
         try
@@ -511,7 +508,7 @@ class ConfigStore
         }
         catch (...)
         {
-            return json(); // Or throw?
+            return json();
         }
     }
 
@@ -620,6 +617,10 @@ class ConfigStore
     T get(std::string_view key, const T &default_value) const
     {
         std::shared_lock lock(mutex_);
+        if (key.empty())
+        {
+            return default_value;
+        }
         if (key.find('/') == std::string_view::npos)
         {
             auto it = data_.find(key);
@@ -670,6 +671,15 @@ class ConfigStore
     T get(std::string_view key, const std::source_location location = std::source_location::current()) const
     {
         std::shared_lock lock(mutex_);
+        if (key.empty())
+        {
+            if (get_strategy_ == GetStrategy::ThrowException)
+            {
+                throw std::runtime_error(std::format("Key not found: {} ({}:{}:{})", key, location.file_name(),
+                                                     location.line(), location.function_name()));
+            }
+            return T{};
+        }
         if (key.find('/') == std::string_view::npos)
         {
             auto it = data_.find(key);
@@ -715,6 +725,10 @@ class ConfigStore
     bool set(std::string_view key, const T &value, const Obfuscate obf = Obfuscate::None,
              const std::source_location location = std::source_location::current())
     {
+        if (key.empty())
+        {
+            return false;
+        }
         {
             std::unique_lock lock(mutex_);
             const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
@@ -756,22 +770,25 @@ class ConfigStore
     {
         {
             std::unique_lock lock(mutex_);
-            const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
+            std::string ptr_str;
+            if (key.empty())
+            {
+                ptr_str = "/";
+            }
+            else
+            {
+                ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
+            }
+
             try
             {
                 const nlohmann::json::json_pointer ptr(ptr_str);
-                if (ptr.empty())
-                { // root
-                    data_.clear();
-                }
-                else
+
+                const auto parent_ptr = ptr.parent_pointer();
+                if (data_.contains(parent_ptr))
                 {
-                    const auto parent_ptr = ptr.parent_pointer();
-                    if (data_.contains(parent_ptr))
-                    {
-                        auto &parent = data_[parent_ptr];
-                        parent.erase(ptr.back());
-                    }
+                    auto &parent = data_[parent_ptr];
+                    parent.erase(ptr.back());
                 }
                 obfuscation_map_.erase(std::string(key));
             }
@@ -794,6 +811,10 @@ class ConfigStore
     bool contains(std::string_view key) const
     {
         std::shared_lock lock(mutex_);
+        if (key.empty())
+        {
+            return false;
+        }
         const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
         return data_.contains(nlohmann::json::json_pointer(ptr_str));
     }
@@ -823,7 +844,6 @@ class ConfigStore
             obf_map_copy = obfuscation_map_;
         }
 
-        // Ensure directory exists
         try
         {
             std::filesystem::path p(file_path_);
@@ -837,7 +857,6 @@ class ConfigStore
             return false;
         }
 
-        // Apply obfuscation
         if (!obf_map_copy.empty())
         {
             for (const auto &[key, type] : obf_map_copy)
@@ -860,11 +879,9 @@ class ConfigStore
                 }
                 catch (...)
                 {
-                    // Skip this key if obfuscation fails
                 }
             }
 
-            // Add meta
             json meta;
             for (const auto &[key, val] : obf_map_copy)
             {
@@ -976,7 +993,6 @@ struct StringHash
 };
 } // namespace detail
 
-// 3.3 全局函数接口
 namespace registry
 {
 inline std::unordered_map<std::string, std::shared_ptr<ConfigStore>, detail::StringHash, std::equal_to<>> &get_stores()
@@ -1020,7 +1036,6 @@ inline ConfigStore &get_store(std::string_view path, Path type = Path::Relative,
     return *it->second;
 }
 
-// Global default store helper (internal)
 inline ConfigStore &get_default_store()
 {
     return get_store("config.json");
