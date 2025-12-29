@@ -20,6 +20,12 @@
 
 #include <nlohmann/json.hpp>
 
+/**
+ * @brief Macro alias for nlohmann::json's non-intrusive struct serialization.
+ * Use this to define JSON binding for a struct outside of the struct definition.
+ */
+#define CONFIG_STRUCT NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE
+
 #if defined(_WIN32)
 #include <shlobj.h>
 #include <windows.h>
@@ -698,12 +704,19 @@ class ConfigStore
         std::shared_lock lock(mutex_);
         if (key.empty())
         {
-            if (get_strategy_ == GetStrategy::ThrowException)
+            try
             {
-                throw std::runtime_error(std::format("Key not found: {} ({}:{}:{})", key, location.file_name(),
-                                                     location.line(), location.function_name()));
+                return data_.get<T>();
             }
-            return T{};
+            catch (...)
+            {
+                if (get_strategy_ == GetStrategy::ThrowException)
+                {
+                    throw std::runtime_error(std::format("Root conversion failed ({}:{}:{})", location.file_name(),
+                                                         location.line(), location.function_name()));
+                }
+                return T{};
+            }
         }
 
         const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);

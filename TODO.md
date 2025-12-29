@@ -4,7 +4,7 @@
 
 ### 1. Support Direct JSON-to-Struct Serialization (JSON 直接转换为结构体)
 
-**Status**: Planned  
+**Status**: Completed
 **Priority**: High
 
 #### 说明 (Explanation)
