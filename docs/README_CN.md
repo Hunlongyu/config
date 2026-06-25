@@ -2,7 +2,7 @@
 
 一个现代化的 C++20 配置管理库，基于 [nlohmann/json](https://github.com/nlohmann/json) 构建。它提供了线程安全、易用的 API，支持多种存储策略、数据混淆和变更监听。
 
-[English Documentation](README.md) | [API 参考文档](docs/API_Reference_CN.md)
+[English Documentation](../README.md) | [API 参考文档](API_Reference_CN.md)
 
 ## ✨ 特性
 

@@ -2,7 +2,7 @@
 
 A modern C++20 configuration management library built on [nlohmann/json](https://github.com/nlohmann/json). It provides a thread-safe, easy-to-use API with support for various storage strategies, data obfuscation, and change listeners.
 
-[中文文档](README_CN.md) | [API Reference](docs/API_Reference.md)
+[中文文档](docs/README_CN.md) | [API Reference](docs/API_Reference.md)
 
 ## ✨ Features
 
