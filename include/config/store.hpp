@@ -111,6 +111,9 @@ class ConfigStore
 
     std::function<void(const json &)> validator_;
 
+    json defaults_;
+    std::unordered_map<std::string, std::string> env_bindings_;
+
     static constexpr const char *META_OBFUSCATION_KEY = "__obfuscate_meta__";
 
     static void deep_merge(json &base, const json &overlay)
@@ -191,27 +194,50 @@ class ConfigStore
         }
     }
 
+    void apply_single_env_binding(const std::string &key, const std::string &value)
+    {
+        nlohmann::json jval;
+        try
+        {
+            jval = nlohmann::json::parse(value);
+        }
+        catch (...)
+        {
+            jval = value;
+        }
+        const std::string ptr_str = (!key.empty() && key.front() == '/') ? key : "/" + key;
+        try
+        {
+            data_[nlohmann::json::json_pointer(ptr_str)] = jval;
+        }
+        catch (...)
+        {
+        }
+    }
+
     void apply_env_overrides()
     {
-        if (opts_.env_prefix.empty())
-            return;
+        if (!opts_.env_prefix.empty())
+        {
 #if defined(_WIN32)
-        LPCH env = GetEnvironmentStrings();
-        if (!env)
-            return;
-        for (LPCH p = env; *p; p += strlen(p) + 1)
-        {
-            std::string entry(p);
-            apply_single_env(entry);
-        }
-        FreeEnvironmentStrings(env);
+            LPCH env = GetEnvironmentStrings();
+            if (env)
+            {
+                for (LPCH p = env; *p; p += strlen(p) + 1)
+                    apply_single_env(std::string(p));
+                FreeEnvironmentStrings(env);
+            }
 #else
-        extern char **environ;
-        for (char **ep = environ; *ep; ++ep)
-        {
-            apply_single_env(std::string(*ep));
-        }
+            extern char **environ;
+            for (char **ep = environ; *ep; ++ep)
+                apply_single_env(std::string(*ep));
 #endif
+        }
+        for (const auto &[key, env_var] : env_bindings_)
+        {
+            if (const char *val = std::getenv(env_var.c_str()))
+                apply_single_env_binding(key, val);
+        }
     }
 
     void load()
@@ -280,17 +306,25 @@ class ConfigStore
         apply_env_overrides();
     }
 
-    void notify(std::string_view key, [[maybe_unused]] const json &val) const
+    void notify(std::string_view key, const json &val) const
     {
         for (const auto &l : listeners_)
         {
-            if (key == l.key || key.find(l.key + "/") == 0)
+            const bool is_wildcard = l.key.empty();
+            if (is_wildcard || key == l.key || key.find(l.key + "/") == 0)
             {
                 try
                 {
-                    std::string ptr_str = (l.key.front() == '/') ? l.key : "/" + l.key;
-                    auto v              = get_value_at(ptr_str);
-                    l.callback(v);
+                    if (is_wildcard)
+                    {
+                        l.callback(val);
+                    }
+                    else
+                    {
+                        std::string ptr_str = (l.key.front() == '/') ? l.key : "/" + l.key;
+                        auto v              = get_value_at(ptr_str);
+                        l.callback(v);
+                    }
                 }
                 catch (...)
                 {
@@ -500,7 +534,17 @@ class ConfigStore
             }
             catch (...)
             {
-                // Fallthrough to return default_value
+                // Fallthrough to check defaults_ layer
+            }
+        }
+        if (defaults_.contains(ptr))
+        {
+            try
+            {
+                return defaults_.at(ptr).get<T>();
+            }
+            catch (...)
+            {
             }
         }
         return default_value;
@@ -556,6 +600,17 @@ class ConfigStore
             catch (...)
             {
                 // Type mismatch: treat as missing key / default value case
+            }
+        }
+
+        if (defaults_.contains(ptr))
+        {
+            try
+            {
+                return defaults_.at(ptr).get<T>();
+            }
+            catch (...)
+            {
             }
         }
 
@@ -1157,6 +1212,154 @@ class ConfigStore
     }
 
     /**
+     * @brief Returns all values under a prefix as a typed map.
+     *
+     * Iterates the immediate children of the node at @p prefix and attempts to
+     * deserialize each value as @p T.  Entries that cannot be converted are
+     * silently skipped.
+     *
+     * @tparam T Type to deserialize each value into.
+     * @param prefix Empty string for the root object, or a key / JSON Pointer path.
+     * @return Map from child key name to deserialized value.
+     */
+    template <typename T>
+        requires JsonReadable<T>
+    [[nodiscard]] std::unordered_map<std::string, T> get_all(std::string_view prefix = "") const
+    {
+        std::shared_lock lock(mutex_);
+        std::unordered_map<std::string, T> result;
+        const json *node = &data_;
+        if (!prefix.empty())
+        {
+            const std::string ptr_str = (prefix.front() == '/') ? std::string(prefix) : "/" + std::string(prefix);
+            try
+            {
+                node = &data_.at(nlohmann::json::json_pointer(ptr_str));
+            }
+            catch (...)
+            {
+                return result;
+            }
+        }
+        if (!node->is_object())
+            return result;
+        for (const auto &[k, v] : node->items())
+        {
+            try
+            {
+                result[k] = v.get<T>();
+            }
+            catch (...)
+            {
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @brief Connects a wildcard listener that fires on every key change.
+     *
+     * The callback receives the new value of the changed key directly.
+     * Use on_any_change() when you need to react to any modification
+     * without knowing the key name in advance.
+     *
+     * @param callback Function invoked on every set() / remove() / clear() call.
+     * @return A RAII Connection handle that auto-disconnects on destruction.
+     */
+    Connection on_any_change(const std::function<void(const json &)> &callback);
+
+    /**
+     * @brief Connects a typed wildcard listener that fires on every key change.
+     *
+     * Wraps on_any_change() with automatic JSON deserialization to type T.
+     * Deserialization errors are silently ignored.
+     *
+     * @tparam T Type to deserialize each changed value into.
+     * @param callback Function invoked on every change, receiving the value as T.
+     * @return A RAII Connection handle that auto-disconnects on destruction.
+     */
+    template <typename T>
+        requires JsonReadable<T>
+    Connection on_any_change(std::function<void(const T &)> callback);
+
+    /**
+     * @brief Explicitly binds a configuration key to a specific environment variable.
+     *
+     * When apply_env_overrides() runs (at load / reload time), the value of
+     * @p env_var is read from the environment and written to @p key.  The value
+     * is JSON-parsed if possible, otherwise stored as a plain string.
+     *
+     * This is independent of StoreOptions::env_prefix — both mechanisms can
+     * coexist.  Calling bind_env() does NOT immediately apply the binding;
+     * call reload() afterwards to force a re-read.
+     *
+     * @param key    Config key / JSON Pointer path to write the env var into.
+     * @param env_var Name of the environment variable to read.
+     */
+    void bind_env(std::string_view key, std::string_view env_var)
+    {
+        std::unique_lock lock(mutex_);
+        env_bindings_[std::string(key)] = std::string(env_var);
+    }
+
+    /**
+     * @brief Returns a snapshot of the sub-tree rooted at @p prefix as a json object.
+     *
+     * This is a point-in-time copy — changes to the store after this call are
+     * not reflected in the returned value.
+     *
+     * @param prefix Key / JSON Pointer path of the sub-tree root.
+     * @return JSON value at the prefix, or an empty json::object() if not found.
+     */
+    [[nodiscard]] json sub(std::string_view prefix) const
+    {
+        std::shared_lock lock(mutex_);
+        if (prefix.empty())
+            return data_;
+        const std::string ptr_str = (prefix.front() == '/') ? std::string(prefix) : "/" + std::string(prefix);
+        try
+        {
+            return data_.at(nlohmann::json::json_pointer(ptr_str));
+        }
+        catch (...)
+        {
+            return json::object();
+        }
+    }
+
+    /**
+     * @brief Registers a default value for a key.
+     *
+     * The defaults layer has lower priority than the live config data: get()
+     * returns the stored default only when the key is absent from data_.
+     * Defaults survive reload() and clear() — they are never written to disk.
+     *
+     * @tparam T Type of the default value.
+     * @param key  Config key / JSON Pointer path (must be non-empty).
+     * @param value Value to return when the key is missing from the live config.
+     * @throws std::invalid_argument If key is empty.
+     */
+    template <typename T>
+        requires JsonWritable<T>
+    void set_default(std::string_view key, const T &value)
+    {
+        if (key.empty())
+            throw std::invalid_argument("set_default() requires a non-empty key");
+        std::unique_lock lock(mutex_);
+        const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
+        defaults_[nlohmann::json::json_pointer(ptr_str)] = value;
+    }
+
+    /**
+     * @brief Removes all registered default values.
+     */
+    void clear_defaults()
+    {
+        std::unique_lock lock(mutex_);
+        defaults_ = json::object();
+    }
+
+    /**
      * @brief Deep-merges a JSON object into the current configuration data.
      *
      * Nested objects are merged recursively; scalar and array values are
@@ -1322,6 +1525,26 @@ template <typename T>
 inline Connection ConfigStore::on_change(const std::string &key, std::function<void(const T &)> callback)
 {
     return connect(key, [cb = std::move(callback)](const nlohmann::json &j) {
+        try
+        {
+            cb(j.get<T>());
+        }
+        catch (...)
+        {
+        }
+    });
+}
+
+inline Connection ConfigStore::on_any_change(const std::function<void(const json &)> &callback)
+{
+    return connect("", callback);
+}
+
+template <typename T>
+    requires JsonReadable<T>
+inline Connection ConfigStore::on_any_change(std::function<void(const T &)> callback)
+{
+    return connect("", [cb = std::move(callback)](const nlohmann::json &j) {
         try
         {
             cb(j.get<T>());
@@ -1677,6 +1900,93 @@ inline void merge(const nlohmann::json &overlay)
 inline void merge_file(const std::string &path, Path type = Path::Relative)
 {
     get_default_store().merge_file(path, type);
+}
+/**
+ * @brief Global convenience function: Loads multiple JSON files in order into the default store.
+ */
+inline void load_layered(const std::vector<std::string> &paths, Path type = Path::Relative)
+{
+    get_default_store().load_layered(paths, type);
+}
+
+/**
+ * @brief Global convenience function: Starts the file watcher on the default store.
+ */
+inline void start_watch(std::chrono::milliseconds interval = std::chrono::milliseconds{1000})
+{
+    get_default_store().start_watch(interval);
+}
+/**
+ * @brief Global convenience function: Stops the file watcher on the default store.
+ */
+inline void stop_watch()
+{
+    get_default_store().stop_watch();
+}
+
+/**
+ * @brief Global convenience function: Connects a listener on the default store.
+ */
+inline Connection connect(const std::string &key, const std::function<void(const ConfigStore::json &)> &callback)
+{
+    return get_default_store().connect(key, callback);
+}
+/**
+ * @brief Global convenience function: Connects a typed listener on the default store.
+ */
+template <typename T> inline Connection on_change(const std::string &key, std::function<void(const T &)> callback)
+{
+    return get_default_store().on_change<T>(key, std::move(callback));
+}
+/**
+ * @brief Global convenience function: Connects a wildcard listener on the default store.
+ */
+inline Connection on_any_change(const std::function<void(const ConfigStore::json &)> &callback)
+{
+    return get_default_store().on_any_change(callback);
+}
+/**
+ * @brief Global convenience function: Connects a typed wildcard listener on the default store.
+ */
+template <typename T> inline Connection on_any_change(std::function<void(const T &)> callback)
+{
+    return get_default_store().on_any_change<T>(std::move(callback));
+}
+
+/**
+ * @brief Global convenience function: Binds a config key to an environment variable in the default store.
+ */
+inline void bind_env(std::string_view key, std::string_view env_var)
+{
+    get_default_store().bind_env(key, env_var);
+}
+/**
+ * @brief Global convenience function: Returns a sub-tree snapshot from the default store.
+ */
+[[nodiscard]] inline ConfigStore::json sub(std::string_view prefix)
+{
+    return get_default_store().sub(prefix);
+}
+/**
+ * @brief Global convenience function: Returns all values under a prefix as a typed map.
+ */
+template <typename T> [[nodiscard]] inline std::unordered_map<std::string, T> get_all(std::string_view prefix = "")
+{
+    return get_default_store().get_all<T>(prefix);
+}
+/**
+ * @brief Global convenience function: Sets a default value for a key in the default store.
+ */
+template <typename T> inline void set_default(std::string_view key, const T &value)
+{
+    get_default_store().set_default<T>(key, value);
+}
+/**
+ * @brief Global convenience function: Clears all default values in the default store.
+ */
+inline void clear_defaults()
+{
+    get_default_store().clear_defaults();
 }
 
 } // namespace config

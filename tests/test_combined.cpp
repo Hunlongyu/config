@@ -1173,3 +1173,228 @@ TEST_F(DumpTest, EmptyStoreReturnsEmptyObject)
     auto s = store.dump(config::JsonFormat::Compact);
     EXPECT_EQ(s, "{}");
 }
+
+// ==========================================
+// get_all<T>() Tests
+// ==========================================
+
+struct GetAllTest : ::testing::Test
+{
+    std::string path = std::filesystem::temp_directory_path().string() + "/test_get_all.json";
+    void TearDown() override
+    {
+        std::filesystem::remove(path);
+    }
+};
+
+TEST_F(GetAllTest, ReturnsImmediateChildren)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("section/a", 1);
+    store.set("section/b", 2);
+    store.set("section/c", 3);
+
+    auto m = store.get_all<int>("section");
+    ASSERT_EQ(m.size(), 3u);
+    EXPECT_EQ(m.at("a"), 1);
+    EXPECT_EQ(m.at("b"), 2);
+    EXPECT_EQ(m.at("c"), 3);
+}
+
+TEST_F(GetAllTest, SkipsNonConvertible)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("s/num", 42);
+    store.set("s/str", std::string("hello"));
+
+    auto m = store.get_all<int>("s");
+    EXPECT_EQ(m.size(), 1u);
+    EXPECT_EQ(m.at("num"), 42);
+}
+
+TEST_F(GetAllTest, MissingPrefixReturnsEmpty)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    auto m = store.get_all<int>("nonexistent");
+    EXPECT_TRUE(m.empty());
+}
+
+TEST_F(GetAllTest, RootLevel)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("x", 10);
+    store.set("y", 20);
+
+    auto m = store.get_all<int>();
+    EXPECT_EQ(m.at("x"), 10);
+    EXPECT_EQ(m.at("y"), 20);
+}
+
+// ==========================================
+// on_any_change() Tests
+// ==========================================
+
+struct OnAnyChangeTest : ::testing::Test
+{
+    std::string path = std::filesystem::temp_directory_path().string() + "/test_wildcard.json";
+    void TearDown() override
+    {
+        std::filesystem::remove(path);
+    }
+};
+
+TEST_F(OnAnyChangeTest, FiresOnEverySet)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    int count = 0;
+    auto conn = store.on_any_change([&](const nlohmann::json &) { ++count; });
+
+    store.set("a", 1);
+    store.set("b", 2);
+    store.set("c/d", 3);
+    EXPECT_EQ(count, 3);
+}
+
+TEST_F(OnAnyChangeTest, DisconnectStopsWildcard)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    int count = 0;
+    auto conn = store.on_any_change([&](const nlohmann::json &) { ++count; });
+
+    store.set("key", 1);
+    conn.disconnect();
+    store.set("key", 2);
+    EXPECT_EQ(count, 1);
+}
+
+// ==========================================
+// bind_env() Tests
+// ==========================================
+
+struct BindEnvTest : ::testing::Test
+{
+    std::string path = std::filesystem::temp_directory_path().string() + "/test_bind_env.json";
+    void TearDown() override
+    {
+        std::filesystem::remove(path);
+    }
+};
+
+TEST_F(BindEnvTest, AppliesBindingOnReload)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set_save_strategy(config::SaveStrategy::Manual);
+
+    _putenv_s("MYAPP_PORT", "9090");
+    store.bind_env("port", "MYAPP_PORT");
+    store.reload();
+
+    EXPECT_EQ(store.get<int>("port", 0), 9090);
+    _putenv_s("MYAPP_PORT", "");
+}
+
+// ==========================================
+// sub() Tests
+// ==========================================
+
+struct SubTest : ::testing::Test
+{
+    std::string path = std::filesystem::temp_directory_path().string() + "/test_sub.json";
+    void TearDown() override
+    {
+        std::filesystem::remove(path);
+    }
+};
+
+TEST_F(SubTest, ReturnsSubtreeSnapshot)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("server/host", std::string("localhost"));
+    store.set("server/port", 8080);
+
+    auto snap = store.sub("server");
+    ASSERT_TRUE(snap.is_object());
+    EXPECT_EQ(snap["host"], "localhost");
+    EXPECT_EQ(snap["port"], 8080);
+}
+
+TEST_F(SubTest, MissingPrefixReturnsEmptyObject)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    auto snap = store.sub("nonexistent");
+    EXPECT_TRUE(snap.is_object());
+    EXPECT_TRUE(snap.empty());
+}
+
+TEST_F(SubTest, SnapshotIsNotLive)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("ns/val", 1);
+    auto snap = store.sub("ns");
+    store.set("ns/val", 99);
+    EXPECT_EQ(snap["val"], 1); // snapshot unchanged
+}
+
+// ==========================================
+// set_default() / clear_defaults() Tests
+// ==========================================
+
+struct DefaultsTest : ::testing::Test
+{
+    std::string path = std::filesystem::temp_directory_path().string() + "/test_defaults.json";
+    void TearDown() override
+    {
+        std::filesystem::remove(path);
+    }
+};
+
+TEST_F(DefaultsTest, ReturnedWhenKeyMissing)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set_save_strategy(config::SaveStrategy::Manual);
+    store.set_default("timeout", 30);
+
+    EXPECT_EQ(store.get<int>("timeout", 0), 30);
+}
+
+TEST_F(DefaultsTest, LiveDataWinsOverDefault)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set_save_strategy(config::SaveStrategy::Manual);
+    store.set_default("timeout", 30);
+    store.set("timeout", 60);
+
+    EXPECT_EQ(store.get<int>("timeout", 0), 60);
+}
+
+TEST_F(DefaultsTest, DefaultSurvivesClear)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set_save_strategy(config::SaveStrategy::Manual);
+    store.set_default("retries", 3);
+    store.set("retries", 5);
+    store.clear();
+
+    EXPECT_EQ(store.get<int>("retries", 0), 3);
+}
+
+TEST_F(DefaultsTest, ClearDefaultsRemovesAll)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set_save_strategy(config::SaveStrategy::Manual);
+    store.set_default("x", 1);
+    store.clear_defaults();
+
+    EXPECT_EQ(store.get<int>("x", 99), 99);
+}
+
+TEST_F(DefaultsTest, ThrowingGetAlsoChecksDefaults)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set_save_strategy(config::SaveStrategy::Manual);
+    store.set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
+    store.set_default("port", 8080);
+
+    EXPECT_NO_THROW({ auto v = store.get<int>("port"); });
+    EXPECT_EQ(store.get<int>("port"), 8080);
+}
