@@ -363,6 +363,7 @@ MigrationBackup/
 FodyWeavers.xsd
 
 /build/
+/build_bm/
 /.trae/
 Testing/
 .superpowers/
