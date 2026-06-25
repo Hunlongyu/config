@@ -665,7 +665,14 @@ class ConfigStore
         std::shared_lock lock(mutex_);
         if (key.empty())
         {
-            return default_value;
+            try
+            {
+                return data_.get<T>();
+            }
+            catch (const nlohmann::json::exception &)
+            {
+                return default_value;
+            }
         }
 
         const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);

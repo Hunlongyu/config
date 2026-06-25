@@ -228,6 +228,20 @@ TEST_F(CoreTest, GetEmptyThrowIncludesDetail)
     }
 }
 
+// 11d. get(key, default_value) with empty key: tries root deserialization, falls back on failure
+TEST_F(CoreTest, GetWithDefaultEmptyKey)
+{
+    // Empty store: root is {} (not convertible to string) — returns default
+    EXPECT_EQ(store->get<std::string>("", "fallback"), "fallback");
+
+    // After setting root struct: compatible type returns root data
+    RootCfg cfg{"world", 7};
+    store->set("", cfg);
+    auto loaded = store->get<RootCfg>("", RootCfg{});
+    EXPECT_EQ(loaded.name, "world");
+    EXPECT_EQ(loaded.value, 7);
+}
+
 // 12. Set Invalid Key (Coverage for catch block)
 TEST_F(CoreTest, SetInvalidKey)
 {
