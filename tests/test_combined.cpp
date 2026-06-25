@@ -162,18 +162,19 @@ TEST_F(CoreTest, ContainsEmpty)
     EXPECT_FALSE(store->contains(""));
 }
 
-// 11. Get Empty with Throw Strategy (Coverage)
+// 11. Get empty key with ThrowException: throws when conversion fails
 TEST_F(CoreTest, GetEmptyThrow)
 {
     store->set_get_strategy(config::GetStrategy::ThrowException);
+    // data_ is empty object {} — get<int>("") fails (object ≠ int) → throws
     EXPECT_THROW(store->get<int>(""), std::runtime_error);
 }
 
-// 11b. Get Empty with Default Strategy (Coverage for return T{})
+// 11b. Get empty key with DefaultValue: returns T{} when conversion fails
 TEST_F(CoreTest, GetEmptyDefault)
 {
     store->set_get_strategy(config::GetStrategy::DefaultValue);
-    // Should return T{} which is 0 for int
+    // data_ is empty object {} — get<int>("") fails → returns T{} = 0
     EXPECT_EQ(store->get<int>(""), 0);
 }
 

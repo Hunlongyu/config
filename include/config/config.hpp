@@ -687,15 +687,18 @@ class ConfigStore
     /**
      * @brief Retrieves a value from the configuration.
      *
-     * Behavior depends on the current GetStrategy if the key is missing:
-     * - DefaultValue: Returns T{}
-     * - ThrowException: Throws std::runtime_error
+     * - For non-empty keys: behavior depends on GetStrategy when key is missing.
+     *   - DefaultValue: Returns T{}
+     *   - ThrowException: Throws std::runtime_error
+     * - For empty key (""): attempts to deserialize the entire root JSON into T.
+     *   - On success: returns the deserialized value (regardless of strategy).
+     *   - On failure: DefaultValue returns T{}; ThrowException throws std::runtime_error.
      *
-     * @tparam T Type of the value to retrieve.
-     * @param key The configuration key or JSON Pointer path.
-     * @param location
-     * @return The retrieved value.
-     * @throws std::runtime_error If key is missing and strategy is ThrowException.
+     * @tparam T Type to deserialize into.
+     * @param key The configuration key / JSON Pointer path, or "" for root.
+     * @param location Source location for diagnostics.
+     * @return The retrieved value, or T{} on failure with DefaultValue strategy.
+     * @throws std::runtime_error On deserialization failure with ThrowException strategy.
      */
     template <typename T>
         requires JsonReadable<T>
