@@ -384,8 +384,8 @@ class ConfigStore
      */
     template <typename T>
         requires JsonWritable<T>
-    bool set(std::string_view key, const T &value, const Obfuscate obf = Obfuscate::None,
-             const std::source_location location = std::source_location::current())
+    [[nodiscard]] bool set(std::string_view key, const T &value, const Obfuscate obf = Obfuscate::None,
+                           const std::source_location location = std::source_location::current())
     {
         if (key.empty())
         {
@@ -463,7 +463,7 @@ class ConfigStore
      * @param key The configuration key or JSON Pointer path to remove.
      * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
      */
-    bool remove(std::string_view key)
+    [[nodiscard]] bool remove(std::string_view key)
     {
         {
             std::unique_lock lock(mutex_);
@@ -506,7 +506,7 @@ class ConfigStore
      * @param key The configuration key or JSON Pointer path.
      * @return true if the key exists, false otherwise.
      */
-    bool contains(std::string_view key) const
+    [[nodiscard]] bool contains(std::string_view key) const
     {
         std::shared_lock lock(mutex_);
         if (key.empty())
@@ -521,7 +521,7 @@ class ConfigStore
      * @brief Saves the current configuration to disk using the current format.
      * @return true if saved successfully, false otherwise.
      */
-    bool save() const
+    [[nodiscard]] bool save() const
     {
         return save(json_format_);
     }
@@ -531,7 +531,7 @@ class ConfigStore
      * @param format The output format (Pretty or Compact).
      * @return true if saved successfully, false otherwise.
      */
-    bool save(JsonFormat format) const
+    [[nodiscard]] bool save(JsonFormat format) const
     {
         bool result = false;
         json save_data;
@@ -620,7 +620,7 @@ class ConfigStore
      *
      * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
      */
-    bool clear()
+    [[nodiscard]] bool clear()
     {
         {
             std::unique_lock lock(mutex_);
@@ -780,21 +780,21 @@ template <typename T> T get(std::string_view key)
 /**
  * @brief Global convenience function: Sets a value in the default store.
  */
-template <typename T> bool set(std::string_view key, const T &value, Obfuscate obf = Obfuscate::None)
+template <typename T> [[nodiscard]] bool set(std::string_view key, const T &value, Obfuscate obf = Obfuscate::None)
 {
     return get_default_store().set(key, value, obf);
 }
 /**
  * @brief Global convenience function: Removes a key from the default store.
  */
-inline bool remove(std::string_view key)
+[[nodiscard]] inline bool remove(std::string_view key)
 {
     return get_default_store().remove(key);
 }
 /**
  * @brief Global convenience function: Checks if a key exists in the default store.
  */
-inline bool contains(std::string_view key)
+[[nodiscard]] inline bool contains(std::string_view key)
 {
     return get_default_store().contains(key);
 }
@@ -802,14 +802,14 @@ inline bool contains(std::string_view key)
 /**
  * @brief Global convenience function: Saves the default store to disk.
  */
-inline bool save()
+[[nodiscard]] inline bool save()
 {
     return get_default_store().save();
 }
 /**
  * @brief Global convenience function: Saves the default store to disk with format.
  */
-inline bool save(const JsonFormat format)
+[[nodiscard]] inline bool save(const JsonFormat format)
 {
     return get_default_store().save(format);
 }
@@ -823,7 +823,7 @@ inline void reload()
 /**
  * @brief Global convenience function: Clears the default store.
  */
-inline bool clear()
+[[nodiscard]] inline bool clear()
 {
     return get_default_store().clear();
 }
