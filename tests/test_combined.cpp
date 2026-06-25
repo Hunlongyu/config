@@ -156,9 +156,19 @@ TEST_F(CoreTest, RemoveManualSave)
     EXPECT_FALSE(store->contains("key"));
 }
 
-// 10. Contains Empty (Coverage)
+// 10. Contains Empty (Coverage) — root empty returns false
 TEST_F(CoreTest, ContainsEmpty)
 {
+    EXPECT_FALSE(store->contains(""));
+}
+
+// 10b. Contains root — returns true when root has at least one key
+TEST_F(CoreTest, ContainsRoot)
+{
+    EXPECT_FALSE(store->contains(""));
+    store->set("foo", 42);
+    EXPECT_TRUE(store->contains(""));
+    store->clear();
     EXPECT_FALSE(store->contains(""));
 }
 

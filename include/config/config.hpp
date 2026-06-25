@@ -855,14 +855,13 @@ class ConfigStore
      */
     bool contains(std::string_view key) const
     {
-        bool result = false;
         std::shared_lock lock(mutex_);
-        if (!key.empty())
+        if (key.empty())
         {
-            const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
-            result                    = data_.contains(nlohmann::json::json_pointer(ptr_str));
+            return !data_.empty();
         }
-        return result;
+        const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
+        return data_.contains(nlohmann::json::json_pointer(ptr_str));
     }
 
     /**
