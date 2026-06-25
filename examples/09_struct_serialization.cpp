@@ -2,55 +2,65 @@
 #include <iostream>
 #include <vector>
 
-// Define a struct
-struct Item {
+struct Item
+{
     std::string name;
     std::string value;
 };
 
-// Define a nested struct
-struct Config {
+struct Config
+{
     std::string app_name;
     int version;
     std::vector<Item> items;
 };
 
-// Macro to map struct fields to JSON keys
+// Strict binding: all fields must be present in JSON
 CONFIG_STRUCT(Item, name, value)
 CONFIG_STRUCT(Config, app_name, version, items)
 
-int main() {
-    // 1. Initialize ConfigStore
-    // We use a temporary file for this example
-    auto& store = config::get_store("example_struct.json", config::Path::Relative);
+// Tolerant binding: missing fields fall back to struct defaults
+struct ServerConfig
+{
+    std::string host = "localhost";
+    int port         = 8080;
+    bool tls         = false;
+};
+CONFIG_STRUCT_WITH_DEFAULT(ServerConfig, host, port, tls)
 
-    // 2. Prepare data
-    std::cout << "Setting up configuration data..." << std::endl;
+int main()
+{
+    auto &store = config::get_store("example_struct.json", config::Path::Relative);
+
+    // 1. Write individual fields (SaveStrategy::Auto saves on each set)
     store.set("app_name", "StructApp");
     store.set("version", 1);
-    
     std::vector<Item> items = {{"item1", "value1"}, {"item2", "value2"}};
     store.set("items", items);
-    
-    // Save to disk (optional, set() usually auto-saves)
-    store.save();
-    
-    // 3. Read back as a struct using root key ""
-    std::cout << "Reading configuration into struct..." << std::endl;
-    try {
-        auto loaded_config = store.get<Config>("");
-        
-        std::cout << "Loaded Config:" << std::endl;
-        std::cout << "App Name: " << loaded_config.app_name << std::endl;
-        std::cout << "Version: " << loaded_config.version << std::endl;
-        std::cout << "Items:" << std::endl;
-        for (const auto& item : loaded_config.items) {
-            std::cout << "  - " << item.name << ": " << item.value << std::endl;
-        }
-    } catch (const std::exception& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+
+    // 2. Read back as a struct via root key ""
+    try
+    {
+        auto cfg = store.get<Config>("");
+        std::cout << "App: " << cfg.app_name << " v" << cfg.version << "\n";
+        for (const auto &item : cfg.items)
+            std::cout << "  " << item.name << ": " << item.value << "\n";
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
-    
+
+    // 3. Round-trip: write a whole struct back to root
+    Config updated{"StructApp", 2, {{"item3", "value3"}}};
+    store.set("", updated);
+
+    // 4. CONFIG_STRUCT_WITH_DEFAULT: only "host" is set, port and tls use defaults
+    auto &srv = config::get_store("example_server.json", config::Path::Relative);
+    srv.set("host", std::string("example.com"));
+    auto sc = srv.get<ServerConfig>("");
+    std::cout << "Server: " << sc.host << ":" << sc.port << (sc.tls ? " (TLS)" : "") << "\n";
+
     return 0;
 }
