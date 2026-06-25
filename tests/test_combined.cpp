@@ -178,6 +178,24 @@ TEST_F(CoreTest, GetEmptyDefault)
     EXPECT_EQ(store->get<int>(""), 0);
 }
 
+// 11c. Get empty key with ThrowException: error message includes nlohmann detail
+TEST_F(CoreTest, GetEmptyThrowIncludesDetail)
+{
+    store->set_get_strategy(config::GetStrategy::ThrowException);
+    // data_ = {} — not convertible to int, throws
+    try
+    {
+        store->get<int>("");
+        FAIL() << "Expected std::runtime_error";
+    }
+    catch (const std::runtime_error &e)
+    {
+        // Message should contain both "Root conversion failed" and nlohmann detail
+        const std::string msg = e.what();
+        EXPECT_NE(msg.find("Root conversion failed"), std::string::npos);
+    }
+}
+
 // 12. Set Invalid Key (Coverage for catch block)
 TEST_F(CoreTest, SetInvalidKey)
 {

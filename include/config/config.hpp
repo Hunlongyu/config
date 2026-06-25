@@ -711,12 +711,13 @@ class ConfigStore
             {
                 return data_.get<T>();
             }
-            catch (...)
+            catch (const nlohmann::json::exception &e)
             {
                 if (get_strategy_ == GetStrategy::ThrowException)
                 {
-                    throw std::runtime_error(std::format("Root conversion failed ({}:{}:{})", location.file_name(),
-                                                         location.line(), location.function_name()));
+                    throw std::runtime_error(std::format("Root conversion failed: {} ({}:{}:{})", e.what(),
+                                                         location.file_name(), location.line(),
+                                                         location.function_name()));
                 }
                 return T{};
             }
