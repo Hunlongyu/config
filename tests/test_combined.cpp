@@ -17,6 +17,14 @@ struct RootCfg
 };
 CONFIG_STRUCT(RootCfg, name, value)
 
+struct PartialCfg
+{
+    std::string name = "default_name";
+    int count        = 0;
+    bool flag        = false;
+};
+CONFIG_STRUCT_WITH_DEFAULT(PartialCfg, name, count, flag)
+
 class CoreTest : public ::testing::Test
 {
   protected:
@@ -256,6 +264,20 @@ TEST_F(CoreTest, RemoveInvalidKey)
     // "~" is invalid in json_pointer
     // remove() swallows exceptions, so it should NOT throw, but the catch block will be entered.
     EXPECT_NO_THROW(store->remove("bad~key"));
+}
+
+// 11e. CONFIG_STRUCT_WITH_DEFAULT: missing fields use struct defaults, no throw
+TEST_F(CoreTest, ConfigStructWithDefault)
+{
+    // Only set "name", leave "count" and "flag" absent
+    store->set("name", std::string("test"));
+
+    // Without WITH_DEFAULT, this would throw for missing "count" and "flag"
+    // With WITH_DEFAULT, missing fields fall back to struct defaults
+    auto cfg = store->get<PartialCfg>("");
+    EXPECT_EQ(cfg.name, "test");
+    EXPECT_EQ(cfg.count, 0);    // struct default
+    EXPECT_EQ(cfg.flag, false); // struct default
 }
 
 // ==========================================

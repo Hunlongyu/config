@@ -26,6 +26,12 @@
  */
 #define CONFIG_STRUCT NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE
 
+/**
+ * @brief Like CONFIG_STRUCT, but missing JSON fields fall back to the struct's
+ *        default-constructed values instead of throwing.
+ */
+#define CONFIG_STRUCT_WITH_DEFAULT NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT
+
 #if defined(_WIN32)
 #include <shlobj.h>
 #include <windows.h>
