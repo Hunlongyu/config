@@ -44,6 +44,7 @@ FetchContent_Declare(
   config
   GIT_REPOSITORY https://github.com/Hunlongyu/config.git
   GIT_TAG        main  # pin to a release tag in production
+  GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(config)
 
