@@ -16,7 +16,7 @@ int main()
 
     std::cout << "=== DefaultValue 策略（默认） ===" << std::endl;
     {
-        store.set_get_strategy(config::GetStrategy::DefaultValue);
+        store.set_missing_key_policy(config::MissingKeyPolicy::DefaultValue);
 
         // 键存在时返回实际值
         auto str = store.get<std::string>("existing_string");
@@ -34,7 +34,7 @@ int main()
 
     std::cout << "\n=== ThrowException 策略 ===" << std::endl;
     {
-        store.set_get_strategy(config::GetStrategy::ThrowException);
+        store.set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
 
         // 键存在时正常返回
         try
@@ -62,7 +62,7 @@ int main()
     std::cout << "\n=== 带默认值的 get（推荐） ===" << std::endl;
     {
         // 带默认值的 get 不受策略影响
-        store.set_get_strategy(config::GetStrategy::ThrowException);
+        store.set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
 
         // 即使是异常策略，也不会抛异常
         auto theme = store.get<std::string>("ui/theme", "light");
@@ -76,7 +76,7 @@ int main()
 
     std::cout << "\n=== 配置验证场景 ===" << std::endl;
     {
-        store.set_get_strategy(config::GetStrategy::ThrowException);
+        store.set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
 
         std::vector<std::string> required_keys = {
             "existing_string", "existing_int",

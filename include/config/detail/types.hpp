@@ -23,11 +23,11 @@ enum class JsonFormat
 };
 
 /**
- * @brief Enum defining available obfuscation methods.
+ * @brief Enum defining available encoding methods.
  */
-enum class Obfuscate
+enum class Encoding
 {
-    None,    ///< No obfuscation (plaintext).
+    None,    ///< No encoding (plaintext).
     Base64,  ///< Base64 encoding.
     Hex,     ///< Hexadecimal string encoding.
     ROT13,   ///< ROT13 substitution cipher.
@@ -47,7 +47,7 @@ enum class SaveStrategy
 /**
  * @brief Enum defining behavior when a key is missing during retrieval.
  */
-enum class GetStrategy
+enum class MissingKeyPolicy
 {
     DefaultValue,  ///< Return a type-specific default value if key is missing.
     ThrowException ///< Throw a std::runtime_error if key is missing.

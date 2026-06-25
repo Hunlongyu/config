@@ -163,27 +163,27 @@ class ObfuscationEngine
         return result;
     }
 
-    static std::string encrypt(std::string_view input, const Obfuscate obf)
+    static std::string encrypt(std::string_view input, const Encoding encoding)
     {
         std::string result;
-        switch (obf)
+        switch (encoding)
         {
-        case Obfuscate::Base64:
+        case Encoding::Base64:
             result = base64_encode(input);
             break;
-        case Obfuscate::Hex:
+        case Encoding::Hex:
             result = hex_encode(input);
             break;
-        case Obfuscate::ROT13:
+        case Encoding::ROT13:
             result = rot13(input);
             break;
-        case Obfuscate::Reverse:
+        case Encoding::Reverse:
             result = reverse(input);
             break;
-        case Obfuscate::Combined:
+        case Encoding::Combined:
             result = reverse(base64_encode(input));
             break;
-        case Obfuscate::None:
+        case Encoding::None:
         default:
             result = std::string(input);
             break;
@@ -191,27 +191,27 @@ class ObfuscationEngine
         return result;
     }
 
-    static std::string decrypt(std::string_view input, const Obfuscate obf)
+    static std::string decrypt(std::string_view input, const Encoding encoding)
     {
         std::string result;
-        switch (obf)
+        switch (encoding)
         {
-        case Obfuscate::Base64:
+        case Encoding::Base64:
             result = base64_decode(input);
             break;
-        case Obfuscate::Hex:
+        case Encoding::Hex:
             result = hex_decode(input);
             break;
-        case Obfuscate::ROT13:
+        case Encoding::ROT13:
             result = rot13(input); // ROT13 is symmetric
             break;
-        case Obfuscate::Reverse:
+        case Encoding::Reverse:
             result = reverse(input); // Reverse is symmetric
             break;
-        case Obfuscate::Combined:
+        case Encoding::Combined:
             result = base64_decode(reverse(input));
             break;
-        case Obfuscate::None:
+        case Encoding::None:
         default:
             result = std::string(input);
             break;

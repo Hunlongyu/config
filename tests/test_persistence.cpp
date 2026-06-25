@@ -172,7 +172,9 @@ TEST_F(PersistenceTest, LoadCorruptedJson)
 TEST_F(PersistenceTest, SaveFailure)
 {
     // Use a directory path as file path to trigger open failure
-    auto store = std::make_unique<config::ConfigStore>("persistence_test_dir/");
+    // Use Manual save strategy so set() does not auto-save and throw
+    auto store = std::make_unique<config::ConfigStore>("persistence_test_dir/", config::Path::Relative,
+                                                       config::SaveStrategy::Manual);
     store->set("key", "value");
 
     // Save should fail safely return false
@@ -190,7 +192,9 @@ TEST_F(PersistenceTest, SaveMkdirFailure)
 
     // Try to save to "blocker/file.json". "blocker" exists as file, so mkdir should fail.
     // Note: On Windows, mkdir on existing file fails.
-    auto store = std::make_unique<config::ConfigStore>("blocker/file.json");
+    // Use Manual save strategy so set() does not auto-save and throw
+    auto store = std::make_unique<config::ConfigStore>("blocker/file.json", config::Path::Relative,
+                                                       config::SaveStrategy::Manual);
     store->set("key", "val");
     EXPECT_FALSE(store->save());
 

@@ -47,26 +47,26 @@ class CoreTest : public ::testing::Test
 TEST_F(CoreTest, BasicTypes)
 {
     // String
-    EXPECT_TRUE(store->set("str", "hello"));
+    store->set("str", "hello");
     EXPECT_EQ(store->get<std::string>("str"), "hello");
 
     // Int
-    EXPECT_TRUE(store->set("int", 42));
+    store->set("int", 42);
     EXPECT_EQ(store->get<int>("int"), 42);
 
     // Double
-    EXPECT_TRUE(store->set("dbl", 3.14));
+    store->set("dbl", 3.14);
     EXPECT_DOUBLE_EQ(store->get<double>("dbl"), 3.14);
 
     // Bool
-    EXPECT_TRUE(store->set("bool", true));
+    store->set("bool", true);
     EXPECT_TRUE(store->get<bool>("bool"));
 }
 
 // 2. Nested Keys (JSON Pointer)
 TEST_F(CoreTest, NestedKeys)
 {
-    EXPECT_TRUE(store->set("section/subsection/key", "value"));
+    store->set("section/subsection/key", "value");
     EXPECT_EQ(store->get<std::string>("section/subsection/key"), "value");
 }
 
@@ -110,9 +110,9 @@ TEST_F(CoreTest, TypeMismatch)
 // 6. Empty Keys
 TEST_F(CoreTest, EmptyKeys)
 {
-    // set("", primitive) returns false — primitives cannot replace root
-    EXPECT_FALSE(store->set("", "value"));
-    EXPECT_FALSE(store->set("", 42));
+    // set("", primitive) throws — primitives cannot replace root
+    EXPECT_THROW(store->set("", "value"), std::invalid_argument);
+    EXPECT_THROW(store->set("", 42), std::invalid_argument);
 
     // get(key, default_value) with empty key returns default when root is empty
     EXPECT_EQ(store->get<std::string>("", "fallback"), "fallback");
@@ -122,7 +122,7 @@ TEST_F(CoreTest, EmptyKeys)
 TEST_F(CoreTest, RootRoundTrip)
 {
     RootCfg original{"hello", 99};
-    EXPECT_TRUE(store->set("", original));
+    store->set("", original);
     EXPECT_TRUE(store->contains(""));
 
     auto loaded = store->get<RootCfg>("");
@@ -182,7 +182,7 @@ TEST_F(CoreTest, RemoveManualSave)
 {
     store->set_save_strategy(config::SaveStrategy::Manual);
     store->set("key", "val");
-    EXPECT_TRUE(store->remove("key")); // Returns true directly
+    store->remove("key"); // Manual save: no disk write, no throw
     EXPECT_FALSE(store->contains("key"));
 }
 
@@ -205,7 +205,7 @@ TEST_F(CoreTest, ContainsRoot)
 // 11. Get empty key with ThrowException: throws when conversion fails
 TEST_F(CoreTest, GetEmptyThrow)
 {
-    store->set_get_strategy(config::GetStrategy::ThrowException);
+    store->set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
     // data_ is empty object {} — get<int>("") fails (object ≠ int) → throws
     EXPECT_THROW(store->get<int>(""), std::runtime_error);
 }
@@ -213,7 +213,7 @@ TEST_F(CoreTest, GetEmptyThrow)
 // 11b. Get empty key with DefaultValue: returns T{} when conversion fails
 TEST_F(CoreTest, GetEmptyDefault)
 {
-    store->set_get_strategy(config::GetStrategy::DefaultValue);
+    store->set_missing_key_policy(config::MissingKeyPolicy::DefaultValue);
     // data_ is empty object {} — get<int>("") fails → returns T{} = 0
     EXPECT_EQ(store->get<int>(""), 0);
 }
@@ -221,7 +221,7 @@ TEST_F(CoreTest, GetEmptyDefault)
 // 11c. Get empty key with ThrowException: error message includes nlohmann detail
 TEST_F(CoreTest, GetEmptyThrowIncludesDetail)
 {
-    store->set_get_strategy(config::GetStrategy::ThrowException);
+    store->set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
     // data_ = {} — not convertible to int, throws
     try
     {
@@ -294,11 +294,11 @@ class AdvancedTest : public ::testing::Test
     }
 };
 
-// 1. GetStrategy::ThrowException
+// 1. MissingKeyPolicy::ThrowException
 TEST_F(AdvancedTest, ThrowExceptionStrategy)
 {
     auto store = std::make_unique<config::ConfigStore>("test_adv.json");
-    store->set_get_strategy(config::GetStrategy::ThrowException);
+    store->set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
 
     EXPECT_THROW(store->get<int>("missing"), std::runtime_error);
 
@@ -322,7 +322,7 @@ TEST_F(AdvancedTest, Listeners)
 
     // Disconnect
     called = false;
-    store->disconnect(id);
+    store->disconnect(id.id());
     store->set("key", "val2");
     EXPECT_FALSE(called);
 }
@@ -432,7 +432,7 @@ class GlobalApiTest : public ::testing::Test
 TEST_F(GlobalApiTest, AllGlobalFunctions)
 {
     // Set & Get
-    EXPECT_TRUE(config::set("global_key", "global_val"));
+    config::set("global_key", "global_val");
     EXPECT_EQ(config::get<std::string>("global_key"), "global_val");
 
     // Get with default
@@ -451,10 +451,10 @@ TEST_F(GlobalApiTest, AllGlobalFunctions)
     EXPECT_EQ(config::get_save_strategy(), config::SaveStrategy::Manual);
 
     // Get Strategy
-    config::set_get_strategy(config::GetStrategy::ThrowException);
-    EXPECT_EQ(config::get_get_strategy(), config::GetStrategy::ThrowException);
+    config::set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
+    EXPECT_EQ(config::missing_key_policy(), config::MissingKeyPolicy::ThrowException);
     EXPECT_THROW(config::get<int>("missing_throw"), std::runtime_error);
-    config::set_get_strategy(config::GetStrategy::DefaultValue); // Reset
+    config::set_missing_key_policy(config::MissingKeyPolicy::DefaultValue); // Reset
 
     // Format
     config::set_format(config::JsonFormat::Compact);
@@ -519,11 +519,11 @@ TEST_F(ObfuscationTest, StandardAlgorithms)
     auto store         = std::make_unique<config::ConfigStore>("test_obf.json");
     std::string secret = "Secret123";
 
-    store->set("b64", secret, config::Obfuscate::Base64);
-    store->set("hex", secret, config::Obfuscate::Hex);
-    store->set("rot", secret, config::Obfuscate::ROT13);
-    store->set("rev", secret, config::Obfuscate::Reverse);
-    store->set("comb", secret, config::Obfuscate::Combined);
+    store->set("b64", secret, config::Encoding::Base64);
+    store->set("hex", secret, config::Encoding::Hex);
+    store->set("rot", secret, config::Encoding::ROT13);
+    store->set("rev", secret, config::Encoding::Reverse);
+    store->set("comb", secret, config::Encoding::Combined);
 
     // Verify retrieval (decryption)
     EXPECT_EQ(store->get<std::string>("b64"), secret);
@@ -540,15 +540,15 @@ TEST_F(ObfuscationTest, Base64Padding)
 
     // Length % 3 == 0 (0 padding)
     std::string p0 = "abc";
-    store->set("p0", p0, config::Obfuscate::Base64);
+    store->set("p0", p0, config::Encoding::Base64);
 
     // Length % 3 == 2 (1 padding '=')
     std::string p1 = "abcde";
-    store->set("p1", p1, config::Obfuscate::Base64);
+    store->set("p1", p1, config::Encoding::Base64);
 
     // Length % 3 == 1 (2 padding '==')
     std::string p2 = "abcd";
-    store->set("p2", p2, config::Obfuscate::Base64);
+    store->set("p2", p2, config::Encoding::Base64);
 
     store->save();
 
@@ -594,7 +594,7 @@ TEST_F(ObfuscationTest, MalformedHex)
 TEST_F(ObfuscationTest, EmptyStrings)
 {
     auto store = std::make_unique<config::ConfigStore>("test_obf.json");
-    store->set("empty", "", config::Obfuscate::Base64);
+    store->set("empty", "", config::Encoding::Base64);
     EXPECT_EQ(store->get<std::string>("empty"), "");
 
     store->save();
@@ -608,7 +608,7 @@ TEST_F(ObfuscationTest, MetaPersistence)
 {
     {
         auto store = std::make_unique<config::ConfigStore>("test_obf.json");
-        store->set("key", "val", config::Obfuscate::ROT13);
+        store->set("key", "val", config::Encoding::ROT13);
         store->save();
     }
 
@@ -624,10 +624,10 @@ TEST_F(ObfuscationTest, FullObfuscationPersistence)
 {
     {
         auto store = std::make_unique<config::ConfigStore>("test_obf.json");
-        store->set("hex", "SecretHex", config::Obfuscate::Hex);
-        store->set("rot", "SecretRot", config::Obfuscate::ROT13);
-        store->set("rev", "SecretRev", config::Obfuscate::Reverse);
-        store->set("comb", "SecretComb", config::Obfuscate::Combined);
+        store->set("hex", "SecretHex", config::Encoding::Hex);
+        store->set("rot", "SecretRot", config::Encoding::ROT13);
+        store->set("rev", "SecretRev", config::Encoding::Reverse);
+        store->set("comb", "SecretComb", config::Encoding::Combined);
         store->save();
     }
 
@@ -641,10 +641,10 @@ TEST_F(ObfuscationTest, FullObfuscationPersistence)
     }
 }
 
-// 7. Obfuscate::None in Meta
+// 7. Encoding::None in Meta
 TEST_F(ObfuscationTest, ObfuscateNoneInMeta)
 {
-    // Manually create file with Obfuscate::None (0) in meta
+    // Manually create file with Encoding::None (0) in meta
     {
         std::ofstream file("test_obf.json");
         file << R"({
@@ -732,7 +732,7 @@ TEST_F(ObfuscationTest, NestedObfuscation)
 {
     {
         auto store = std::make_unique<config::ConfigStore>("test_obf.json");
-        store->set("section/secret", "hidden", config::Obfuscate::Base64);
+        store->set("section/secret", "hidden", config::Encoding::Base64);
         store->save();
     }
 
@@ -751,7 +751,7 @@ TEST_F(ObfuscationTest, NestedObfuscation)
 TEST_F(ObfuscationTest, InvalidEnumCoverage)
 {
     std::string input = "test";
-    auto invalid_obf  = static_cast<config::Obfuscate>(999);
+    auto invalid_obf  = static_cast<config::Encoding>(999);
 
     // Test encrypt default path (should return plain text)
     EXPECT_EQ(config::detail::ObfuscationEngine::encrypt(input, invalid_obf), input);
@@ -922,7 +922,9 @@ TEST_F(PersistenceTest, LoadCorruptedJson)
 TEST_F(PersistenceTest, SaveFailure)
 {
     // Use a directory path as file path to trigger open failure
-    auto store = std::make_unique<config::ConfigStore>("persistence_test_dir/");
+    // Use Manual save strategy so set() does not auto-save and throw
+    auto store = std::make_unique<config::ConfigStore>("persistence_test_dir/", config::Path::Relative,
+                                                       config::SaveStrategy::Manual);
     store->set("key", "value");
 
     // Save should fail safely return false
@@ -940,7 +942,9 @@ TEST_F(PersistenceTest, SaveMkdirFailure)
 
     // Try to save to "blocker/file.json". "blocker" exists as file, so mkdir should fail.
     // Note: On Windows, mkdir on existing file fails.
-    auto store = std::make_unique<config::ConfigStore>("blocker/file.json");
+    // Use Manual save strategy so set() does not auto-save and throw
+    auto store = std::make_unique<config::ConfigStore>("blocker/file.json", config::Path::Relative,
+                                                       config::SaveStrategy::Manual);
     store->set("key", "val");
     EXPECT_FALSE(store->save());
 

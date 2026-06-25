@@ -15,22 +15,22 @@ int main()
     std::string secret = "MySecretPassword123!";
 
     // 不混淆
-    store.set("password_none", secret, config::Obfuscate::None);
+    store.set("password_none", secret, config::Encoding::None);
 
     // Base64 编码
-    store.set("password_base64", secret, config::Obfuscate::Base64);
+    store.set("password_base64", secret, config::Encoding::Base64);
 
     // 十六进制编码
-    store.set("password_hex", secret, config::Obfuscate::Hex);
+    store.set("password_hex", secret, config::Encoding::Hex);
 
     // ROT13
-    store.set("password_rot13", secret, config::Obfuscate::ROT13);
+    store.set("password_rot13", secret, config::Encoding::ROT13);
 
     // 反转
-    store.set("password_reverse", secret, config::Obfuscate::Reverse);
+    store.set("password_reverse", secret, config::Encoding::Reverse);
 
     // 组合混淆
-    store.set("password_combined", secret, config::Obfuscate::Combined);
+    store.set("password_combined", secret, config::Encoding::Combined);
 
     std::cout << std::format("原始密码: {}\n", secret);
     std::cout << "\n混淆后的存储格式（查看 obfuscated.json）：" << std::endl;
@@ -66,14 +66,14 @@ int main()
     std::cout << "\n=== 实际应用场景 ===" << std::endl;
 
     // API 密钥
-    store.set("api/key", "sk_live_1234567890abcdef", config::Obfuscate::Base64);
-    store.set("api/secret", "secret_key_xyz", config::Obfuscate::Combined);
+    store.set("api/key", "sk_live_1234567890abcdef", config::Encoding::Base64);
+    store.set("api/secret", "secret_key_xyz", config::Encoding::Combined);
 
     // 数据库密码
-    store.set("database/password", "db_pass_123", config::Obfuscate::Combined);
+    store.set("database/password", "db_pass_123", config::Encoding::Combined);
 
     // 用户令牌
-    store.set("user/token", "user_token_abc", config::Obfuscate::Hex);
+    store.set("user/token", "user_token_abc", config::Encoding::Hex);
 
     std::cout << "已存储混淆的敏感配置" << std::endl;
     std::cout << "查看 obfuscated.json 可以看到数据已混淆" << std::endl;

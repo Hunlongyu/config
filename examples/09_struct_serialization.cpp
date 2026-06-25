@@ -41,7 +41,7 @@ int main()
     // 2. Read back as a struct via root key ""
     try
     {
-        auto cfg = store.get<Config>("");
+        auto cfg = store.get_root<Config>();
         std::cout << "App: " << cfg.app_name << " v" << cfg.version << "\n";
         for (const auto &item : cfg.items)
             std::cout << "  " << item.name << ": " << item.value << "\n";
@@ -54,12 +54,12 @@ int main()
 
     // 3. Round-trip: write a whole struct back to root
     Config updated{"StructApp", 2, {{"item3", "value3"}}};
-    store.set("", updated);
+    store.set_root(updated);
 
     // 4. CONFIG_STRUCT_WITH_DEFAULT: only "host" is set, port and tls use defaults
     auto &srv = config::get_store("example_server.json", config::Path::Relative);
     srv.set("host", std::string("example.com"));
-    auto sc = srv.get<ServerConfig>("");
+    auto sc = srv.get_root<ServerConfig>();
     std::cout << "Server: " << sc.host << ":" << sc.port << (sc.tls ? " (TLS)" : "") << "\n";
 
     return 0;

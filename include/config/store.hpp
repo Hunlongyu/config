@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -12,8 +14,13 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 #include <nlohmann/json.hpp>
 
@@ -23,6 +30,9 @@
 
 namespace config
 {
+
+// Forward declaration for RAII connection handle.
+class Connection;
 
 /**
  * @brief Concept to ensure a type can be retrieved from JSON.
@@ -37,6 +47,30 @@ template <typename T>
 concept JsonWritable = requires(nlohmann::json j, T v) { j = v; };
 
 /**
+ * @brief Options bundle for constructing a ConfigStore.
+ *
+ * Aggregates all per-store settings so callers can use named fields instead
+ * of a positional four-argument constructor.
+ */
+struct StoreOptions
+{
+    Path path_type              = Path::Relative;
+    SaveStrategy save           = SaveStrategy::Auto;
+    MissingKeyPolicy on_missing = MissingKeyPolicy::DefaultValue;
+    JsonFormat format           = JsonFormat::Pretty;
+    std::string env_prefix; // empty = no env var override; used in B13
+};
+
+/**
+ * @brief Exception thrown when an auto-save disk write fails in set/remove/clear.
+ */
+class SaveError : public std::runtime_error
+{
+  public:
+    using std::runtime_error::runtime_error;
+};
+
+/**
  * @brief Thread-safe configuration store managing JSON data persistence and retrieval.
  *
  * Provides thread-safe access to configuration data stored in JSON format.
@@ -46,19 +80,20 @@ class ConfigStore
 {
   public:
     using json             = nlohmann::json;
-    using ListenerId       = size_t;
     using ListenerCallback = std::function<void(const json &)>;
+    using ListenerId       = size_t;
 
   private:
     std::string file_path_;
     Path path_type_;
     SaveStrategy save_strategy_;
-    GetStrategy get_strategy_;
+    MissingKeyPolicy missing_key_policy_;
     JsonFormat json_format_ = JsonFormat::Pretty;
+    StoreOptions opts_;
 
     mutable std::shared_mutex mutex_;
     json data_;
-    std::unordered_map<std::string, Obfuscate> obfuscation_map_;
+    std::unordered_map<std::string, Encoding> obfuscation_map_;
 
     struct Listener
     {
@@ -70,7 +105,97 @@ class ConfigStore
     std::vector<Listener> listeners_;
     std::atomic<size_t> next_listener_id_{1};
 
+    std::thread watcher_thread_;
+    std::atomic<bool> watch_active_{false};
+    std::filesystem::file_time_type last_write_time_;
+
+    std::function<void(const json &)> validator_;
+
     static constexpr const char *META_OBFUSCATION_KEY = "__obfuscate_meta__";
+
+    static void deep_merge(json &base, const json &overlay)
+    {
+        if (base.is_object() && overlay.is_object())
+        {
+            for (const auto &[key, val] : overlay.items())
+            {
+                if (base.contains(key) && base[key].is_object() && val.is_object())
+                {
+                    deep_merge(base[key], val);
+                }
+                else
+                {
+                    base[key] = val;
+                }
+            }
+        }
+        else
+        {
+            base = overlay;
+        }
+    }
+
+    void apply_single_env(const std::string &entry)
+    {
+        const auto eq = entry.find('=');
+        if (eq == std::string::npos)
+            return;
+        const std::string name  = entry.substr(0, eq);
+        const std::string value = entry.substr(eq + 1);
+
+        if (name.size() <= opts_.env_prefix.size())
+            return;
+        if (name.substr(0, opts_.env_prefix.size()) != opts_.env_prefix)
+            return;
+
+        // Strip prefix, lowercase, replace _ with /
+        std::string key = name.substr(opts_.env_prefix.size());
+        std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+        std::replace(key.begin(), key.end(), '_', '/');
+
+        // Try to parse value as JSON; fallback to string
+        nlohmann::json jval;
+        try
+        {
+            jval = nlohmann::json::parse(value);
+        }
+        catch (...)
+        {
+            jval = value;
+        }
+
+        const std::string ptr_str = "/" + key;
+        try
+        {
+            data_[nlohmann::json::json_pointer(ptr_str)] = jval;
+        }
+        catch (...)
+        {
+        }
+    }
+
+    void apply_env_overrides()
+    {
+        if (opts_.env_prefix.empty())
+            return;
+#if defined(_WIN32)
+        LPCH env = GetEnvironmentStrings();
+        if (!env)
+            return;
+        for (LPCH p = env; *p; p += strlen(p) + 1)
+        {
+            std::string entry(p);
+            apply_single_env(entry);
+        }
+        FreeEnvironmentStrings(env);
+#else
+        extern char **environ;
+        for (char **ep = environ; *ep; ++ep)
+        {
+            apply_single_env(std::string(*ep));
+        }
+#endif
+    }
 
     void load()
     {
@@ -87,14 +212,14 @@ class ConfigStore
                     auto meta = loaded_data[META_OBFUSCATION_KEY];
                     for (auto &[key, val] : meta.items())
                     {
-                        obfuscation_map_[key] = static_cast<Obfuscate>(val.get<int>());
+                        obfuscation_map_[key] = static_cast<Encoding>(val.get<int>());
                     }
                     loaded_data.erase(META_OBFUSCATION_KEY);
                 }
 
                 for (const auto &[key, type] : obfuscation_map_)
                 {
-                    if (type == Obfuscate::None)
+                    if (type == Encoding::None)
                         continue;
 
                     std::string ptr_str = (key.front() == '/') ? key : "/" + key;
@@ -134,6 +259,11 @@ class ConfigStore
         else
         {
             data_ = json::object();
+        }
+        apply_env_overrides();
+        if (validator_)
+        {
+            validator_(data_); // throws on invalid — let the exception propagate
         }
     }
 
@@ -184,14 +314,29 @@ class ConfigStore
      * @param path File path for the configuration file.
      * @param type Strategy for resolving the file path.
      * @param save_strategy Strategy for saving changes (Auto or Manual).
-     * @param get_strategy Strategy for handling missing keys (DefaultValue or ThrowException).
+     * @param missing_key_policy Strategy for handling missing keys (DefaultValue or ThrowException).
      */
     ConfigStore(const std::string &path, const Path type = Path::Relative,
-                const SaveStrategy save_strategy = SaveStrategy::Auto,
-                const GetStrategy get_strategy   = GetStrategy::DefaultValue)
-        : path_type_(type), save_strategy_(save_strategy), get_strategy_(get_strategy)
+                const SaveStrategy save_strategy          = SaveStrategy::Auto,
+                const MissingKeyPolicy missing_key_policy = MissingKeyPolicy::DefaultValue)
+        : path_type_(type), save_strategy_(save_strategy), missing_key_policy_(missing_key_policy)
     {
         file_path_ = detail::PathResolver::resolve(path, type);
+        load();
+    }
+
+    /**
+     * @brief Constructs a new ConfigStore instance using a StoreOptions bundle.
+     *
+     * @param path File path for the configuration file.
+     * @param opts Options struct specifying path type, save strategy, missing key
+     *             policy, JSON format, and optional environment-variable prefix.
+     */
+    explicit ConfigStore(const std::string &path, StoreOptions opts)
+        : path_type_(opts.path_type), save_strategy_(opts.save), missing_key_policy_(opts.on_missing),
+          json_format_(opts.format), opts_(opts)
+    {
+        file_path_ = detail::PathResolver::resolve(path, opts.path_type);
         load();
     }
 
@@ -200,6 +345,11 @@ class ConfigStore
     ConfigStore(ConfigStore &&)                 = delete;
     ConfigStore &operator=(ConfigStore &&)      = delete;
 
+    ~ConfigStore()
+    {
+        stop_watch();
+    }
+
     /**
      * @brief Gets the absolute path to the configuration file.
      * @return Absolute file path string.
@@ -207,6 +357,15 @@ class ConfigStore
     std::string get_store_path() const
     {
         return file_path_;
+    }
+
+    /**
+     * @brief Gets the Path type used when constructing this store.
+     * @return The Path enum value (e.g., Relative, Absolute, AppData).
+     */
+    Path path_type() const
+    {
+        return path_type_;
     }
 
     /**
@@ -230,23 +389,23 @@ class ConfigStore
     }
 
     /**
-     * @brief Sets the strategy for handling missing keys.
-     * @param strategy The new GetStrategy (DefaultValue or ThrowException).
+     * @brief Sets the policy for handling missing keys.
+     * @param policy The new MissingKeyPolicy (DefaultValue or ThrowException).
      */
-    void set_get_strategy(const GetStrategy strategy)
+    void set_missing_key_policy(const MissingKeyPolicy policy)
     {
         std::unique_lock lock(mutex_);
-        get_strategy_ = strategy;
+        missing_key_policy_ = policy;
     }
 
     /**
-     * @brief Gets the current retrieval strategy.
-     * @return Current GetStrategy.
+     * @brief Gets the current missing key policy.
+     * @return Current MissingKeyPolicy.
      */
-    GetStrategy get_get_strategy() const
+    MissingKeyPolicy missing_key_policy() const
     {
         std::shared_lock lock(mutex_);
-        return get_strategy_;
+        return missing_key_policy_;
     }
 
     /**
@@ -267,6 +426,30 @@ class ConfigStore
     {
         std::shared_lock lock(mutex_);
         return json_format_;
+    }
+
+    /**
+     * @brief Registers a validator callback invoked after every load()/reload().
+     *
+     * The callable receives the full JSON object after data is loaded and env
+     * overrides are applied. Throw from the validator to reject invalid config;
+     * the exception propagates to the caller of load()/reload().
+     *
+     * @param validator Callable with signature void(const json&).
+     */
+    void set_validator(std::function<void(const json &)> validator)
+    {
+        std::unique_lock lock(mutex_);
+        validator_ = std::move(validator);
+    }
+
+    /**
+     * @brief Removes the previously registered validator callback.
+     */
+    void clear_validator()
+    {
+        std::unique_lock lock(mutex_);
+        validator_ = nullptr;
     }
 
     /**
@@ -313,7 +496,7 @@ class ConfigStore
     /**
      * @brief Retrieves a value from the configuration.
      *
-     * - For non-empty keys: behavior depends on GetStrategy when key is missing.
+     * - For non-empty keys: behavior depends on MissingKeyPolicy when key is missing.
      *   - DefaultValue: Returns T{}
      *   - ThrowException: Throws std::runtime_error
      * - For empty key (""): attempts to deserialize the entire root JSON into T.
@@ -339,7 +522,7 @@ class ConfigStore
             }
             catch (const nlohmann::json::exception &e)
             {
-                if (get_strategy_ == GetStrategy::ThrowException)
+                if (missing_key_policy_ == MissingKeyPolicy::ThrowException)
                 {
                     throw std::runtime_error(std::format("Root conversion failed: {} ({}:{}:{})", e.what(),
                                                          location.file_name(), location.line(),
@@ -363,7 +546,7 @@ class ConfigStore
             }
         }
 
-        if (get_strategy_ == GetStrategy::ThrowException)
+        if (missing_key_policy_ == MissingKeyPolicy::ThrowException)
         {
             throw std::runtime_error(std::format("Key not found: {} ({}:{}:{})", key, location.file_name(),
                                                  location.line(), location.function_name()));
@@ -377,15 +560,16 @@ class ConfigStore
      * @tparam T Type of the value to set.
      * @param key The configuration key or JSON Pointer path.
      * @param value The value to store.
-     * @param obf Obfuscation method to apply (optional).
+     * @param encoding Encoding method to apply (optional).
      * @param location
-     * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
+     * @throws std::invalid_argument If key is "" and value is not a JSON object type.
      * @throws std::runtime_error If setting the value fails in memory (e.g., path conflict).
+     * @throws SaveError If auto-save is enabled and the disk write fails.
      */
     template <typename T>
         requires JsonWritable<T>
-    [[nodiscard]] bool set(std::string_view key, const T &value, const Obfuscate obf = Obfuscate::None,
-                           const std::source_location location = std::source_location::current())
+    void set(std::string_view key, const T &value, const Encoding encoding = Encoding::None,
+             const std::source_location location = std::source_location::current())
     {
         if (key.empty())
         {
@@ -397,10 +581,14 @@ class ConfigStore
                     nlohmann::json new_root = nlohmann::json(value);
                     if (!new_root.is_object())
                     {
-                        return false;
+                        throw std::invalid_argument("set(\"\") requires a JSON object type");
                     }
                     data_ = std::move(new_root);
                     obfuscation_map_.clear();
+                }
+                catch (const std::invalid_argument &)
+                {
+                    throw;
                 }
                 catch (const std::exception &e)
                 {
@@ -414,9 +602,12 @@ class ConfigStore
             }
             if (save_strategy_ == SaveStrategy::Auto)
             {
-                return save();
+                if (!save())
+                {
+                    throw SaveError("Save failed for key '': disk write error");
+                }
             }
-            return true;
+            return;
         }
 
         std::string error_msg;
@@ -427,9 +618,9 @@ class ConfigStore
             {
                 data_[nlohmann::json::json_pointer(ptr_str)] = value;
 
-                if (obf != Obfuscate::None)
+                if (encoding != Encoding::None)
                 {
-                    obfuscation_map_[std::string(key)] = obf;
+                    obfuscation_map_[std::string(key)] = encoding;
                 }
                 else
                 {
@@ -450,20 +641,69 @@ class ConfigStore
 
         notify(key, json(value));
 
-        bool result = true;
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            result = save();
+            if (!save())
+            {
+                throw SaveError("Save failed for key '" + std::string(key) + "': disk write error");
+            }
         }
-        return result;
+    }
+
+    /**
+     * @brief Retrieves the root JSON object as type T, with a default fallback.
+     * @tparam T Type to deserialize the root into.
+     * @param default_value The value to return if deserialization fails.
+     * @return The deserialized root value or default_value.
+     */
+    template <typename T>
+        requires JsonReadable<T>
+    T get_root(const T &default_value) const
+    {
+        return get<T>("", default_value);
+    }
+
+    /**
+     * @brief Retrieves the root JSON object as type T.
+     * @tparam T Type to deserialize the root into.
+     * @param location Source location for diagnostics.
+     * @return The deserialized root value, or T{} on failure with DefaultValue strategy.
+     * @throws std::runtime_error On deserialization failure with ThrowException strategy.
+     */
+    template <typename T>
+        requires JsonReadable<T>
+    T get_root(const std::source_location location = std::source_location::current()) const
+    {
+        return get<T>("", location);
+    }
+
+    /**
+     * @brief Replaces the entire root JSON object with the given value.
+     * @tparam T Type of the value to set as root.
+     * @param value The value to store as the new root.
+     */
+    template <typename T>
+        requires JsonWritable<T>
+    void set_root(const T &value)
+    {
+        set<T>("", value);
+    }
+
+    /**
+     * @brief Returns the configuration file path as a std::filesystem::path.
+     * @return Absolute file path.
+     */
+    std::filesystem::path path() const
+    {
+        return std::filesystem::path(file_path_);
     }
 
     /**
      * @brief Removes a key and its value from the configuration.
      * @param key The configuration key or JSON Pointer path to remove.
-     * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
+     * @throws SaveError If auto-save is enabled and the disk write fails.
      */
-    [[nodiscard]] bool remove(std::string_view key)
+    void remove(std::string_view key)
     {
         {
             std::unique_lock lock(mutex_);
@@ -493,12 +733,13 @@ class ConfigStore
             {
             }
         }
-        bool result = true;
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            result = save();
+            if (!save())
+            {
+                throw SaveError("Remove: disk write error");
+            }
         }
-        return result;
     }
 
     /**
@@ -535,7 +776,7 @@ class ConfigStore
     {
         bool result = false;
         json save_data;
-        std::unordered_map<std::string, Obfuscate> obf_map_copy;
+        std::unordered_map<std::string, Encoding> obf_map_copy;
 
         {
             std::shared_lock lock(mutex_);
@@ -555,7 +796,7 @@ class ConfigStore
             {
                 for (const auto &[key, type] : obf_map_copy)
                 {
-                    if (type == Obfuscate::None)
+                    if (type == Encoding::None)
                         continue;
 
                     std::string ptr_str = (key.front() == '/') ? key : "/" + key;
@@ -618,21 +859,22 @@ class ConfigStore
      * @brief Clears all configuration data and obfuscation rules.
      * If SaveStrategy is Auto, this change is immediately persisted to disk.
      *
-     * @return true if the operation succeeded (including auto-save if enabled), false if auto-save failed.
+     * @throws SaveError If auto-save is enabled and the disk write fails.
      */
-    [[nodiscard]] bool clear()
+    void clear()
     {
         {
             std::unique_lock lock(mutex_);
             data_.clear();
             obfuscation_map_.clear();
         }
-        bool result = true;
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            result = save();
+            if (!save())
+            {
+                throw SaveError("Clear: disk write error");
+            }
         }
-        return result;
     }
 
     /**
@@ -642,29 +884,341 @@ class ConfigStore
      *
      * @param key The key to listen to.
      * @param callback Function to call on change.
-     * @return ID of the listener (used for disconnecting).
+     * @return A RAII Connection handle that auto-disconnects on destruction.
      */
-    size_t connect(const std::string &key, const std::function<void(const nlohmann::json &)> &callback)
+    Connection connect(const std::string &key, const std::function<void(const json &)> &callback);
+
+    /**
+     * @brief Connects a typed listener callback to a specific key.
+     *
+     * Wraps connect() with automatic JSON deserialization to type T.
+     * Deserialization errors are silently ignored.
+     *
+     * @tparam T Type to deserialize the JSON value into.
+     * @param key The key to listen to.
+     * @param callback Function to call on change, receiving the value as T.
+     * @return A RAII Connection handle that auto-disconnects on destruction.
+     */
+    template <typename T>
+        requires JsonReadable<T>
+    Connection on_change(const std::string &key, std::function<void(const T &)> callback);
+
+    /**
+     * @brief Atomically reads a key or initializes it with a default value.
+     *
+     * If the key already exists and can be decoded as T, returns the stored value.
+     * Otherwise writes default_value for the key and returns it.
+     * When SaveStrategy is Auto the store is saved after initialization.
+     *
+     * @tparam T Type to read/write (must satisfy JsonReadable and JsonWritable).
+     * @param key The configuration key or JSON Pointer path.
+     * @param default_value Value to store and return if the key is absent or unreadable.
+     * @return The existing value, or default_value after initialization.
+     * @throws SaveError If auto-save is enabled and the disk write fails.
+     */
+    template <typename T>
+        requires JsonReadable<T> && JsonWritable<T>
+    T get_or_set(std::string_view key, const T &default_value)
     {
         std::unique_lock lock(mutex_);
-        const size_t id = next_listener_id_++;
-        listeners_.push_back({id, key, callback});
-        return id;
+        const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
+        const nlohmann::json::json_pointer ptr(ptr_str);
+        if (data_.contains(ptr))
+        {
+            try
+            {
+                return data_.at(ptr).get<T>();
+            }
+            catch (...)
+            {
+            }
+        }
+        data_[ptr] = default_value;
+        if (save_strategy_ == SaveStrategy::Auto)
+        {
+            lock.unlock();
+            if (!save())
+                throw SaveError("get_or_set: auto-save failed for key '" + std::string(key) + "'");
+        }
+        return default_value;
+    }
+
+    /**
+     * @brief Starts a background thread that polls the config file every interval ms.
+     *
+     * If the file's modification time changes, reload() is called automatically.
+     * Calling start_watch() while already watching has no effect.
+     *
+     * @param interval Polling interval (default: 1000 ms).
+     */
+    void start_watch(std::chrono::milliseconds interval = std::chrono::milliseconds{1000})
+    {
+        if (watch_active_.exchange(true))
+            return; // already watching
+        if (std::filesystem::exists(file_path_))
+        {
+            last_write_time_ = std::filesystem::last_write_time(file_path_);
+        }
+        watcher_thread_ = std::thread([this, interval]() {
+            while (watch_active_)
+            {
+                std::this_thread::sleep_for(interval);
+                if (!watch_active_)
+                    break;
+                try
+                {
+                    if (std::filesystem::exists(file_path_))
+                    {
+                        auto mtime = std::filesystem::last_write_time(file_path_);
+                        if (mtime != last_write_time_)
+                        {
+                            last_write_time_ = mtime;
+                            reload();
+                        }
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+        });
+    }
+
+    /**
+     * @brief Stops the background file-watcher thread, if running.
+     *
+     * Blocks until the watcher thread has exited.
+     */
+    void stop_watch()
+    {
+        watch_active_ = false;
+        if (watcher_thread_.joinable())
+            watcher_thread_.join();
     }
 
     /**
      * @brief Disconnects a listener by its ID.
-     * @param connection_id The ID returned by connect().
+     * @param connection_id The ID returned by connect() / held by a Connection.
      */
     void disconnect(size_t connection_id)
     {
         std::unique_lock lock(mutex_);
-        listeners_.erase(
-            std::ranges::remove_if(listeners_, [connection_id](const Listener &l) { return l.id == connection_id; })
-                .begin(),
-            listeners_.end());
+        listeners_.erase(std::remove_if(listeners_.begin(), listeners_.end(),
+                                        [connection_id](const Listener &l) { return l.id == connection_id; }),
+                         listeners_.end());
+    }
+
+    /**
+     * @brief Returns all immediate child keys at the top level or under a given prefix.
+     *
+     * @param prefix Empty string for root-level keys, or a key / JSON Pointer path
+     *               designating a sub-object.
+     * @return Vector of child key names (not full paths).
+     */
+    std::vector<std::string> keys(std::string_view prefix = "") const
+    {
+        std::shared_lock lock(mutex_);
+        std::vector<std::string> result;
+        if (prefix.empty())
+        {
+            if (data_.is_object())
+            {
+                for (const auto &[k, _] : data_.items())
+                    result.push_back(k);
+            }
+        }
+        else
+        {
+            const std::string ptr_str = (prefix.front() == '/') ? std::string(prefix) : "/" + std::string(prefix);
+            try
+            {
+                const auto &node = data_.at(nlohmann::json::json_pointer(ptr_str));
+                if (node.is_object())
+                {
+                    for (const auto &[k, _] : node.items())
+                        result.push_back(k);
+                }
+            }
+            catch (...)
+            {
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @brief Alias for keys() — returns immediate child key names under prefix.
+     *
+     * The name emphasises subtree traversal; behaviour is identical to keys().
+     *
+     * @param prefix Empty string for root-level keys, or a key / JSON Pointer path.
+     * @return Vector of child key names.
+     */
+    std::vector<std::string> children(std::string_view prefix = "") const
+    {
+        return keys(prefix);
+    }
+
+    /**
+     * @brief Deep-merges a JSON object into the current configuration data.
+     *
+     * Nested objects are merged recursively; scalar and array values are
+     * overwritten by the overlay.  Requires a JSON object at the top level.
+     *
+     * @param overlay JSON object whose keys override or extend current data.
+     * @throws std::invalid_argument If overlay is not a JSON object.
+     * @throws SaveError If SaveStrategy is Auto and the disk write fails.
+     */
+    void merge(const json &overlay)
+    {
+        if (!overlay.is_object())
+            throw std::invalid_argument("merge() requires a JSON object");
+        {
+            std::unique_lock lock(mutex_);
+            deep_merge(data_, overlay);
+        }
+        if (save_strategy_ == SaveStrategy::Auto)
+        {
+            if (!save())
+                throw SaveError("merge: auto-save failed");
+        }
+    }
+
+    /**
+     * @brief Loads a JSON file from disk and deep-merges it into current data.
+     *
+     * @param path File path to load.
+     * @param type Strategy for resolving the file path.
+     * @throws std::runtime_error If the file does not exist.
+     * @throws SaveError If SaveStrategy is Auto and the disk write fails.
+     */
+    void merge_file(const std::string &path, Path type = Path::Relative)
+    {
+        const std::string abs_path = detail::PathResolver::resolve(path, type);
+        if (!std::filesystem::exists(abs_path))
+            throw std::runtime_error("merge_file: file not found: " + abs_path);
+        json overlay;
+        {
+            std::ifstream f(abs_path);
+            f >> overlay;
+        }
+        merge(overlay);
+    }
+
+    /**
+     * @brief Loads multiple JSON files in order, merging each into the store.
+     *
+     * Files are processed left-to-right; later files have higher priority.
+     * Non-existent files are silently skipped.  Parse errors are also silently
+     * ignored so a corrupt optional layer does not block loading.
+     *
+     * @param paths Ordered list of file paths.
+     * @param type  Strategy for resolving each path.
+     * @throws SaveError If SaveStrategy is Auto and the disk write fails.
+     */
+    void load_layered(const std::vector<std::string> &paths, Path type = Path::Relative)
+    {
+        for (const auto &p : paths)
+        {
+            const std::string abs = detail::PathResolver::resolve(p, type);
+            if (!std::filesystem::exists(abs))
+                continue;
+            try
+            {
+                json layer_data;
+                std::ifstream f(abs);
+                f >> layer_data;
+                {
+                    std::unique_lock lock(mutex_);
+                    deep_merge(data_, layer_data);
+                }
+            }
+            catch (...)
+            {
+            }
+        }
+        if (save_strategy_ == SaveStrategy::Auto)
+        {
+            if (!save())
+                throw SaveError("load_layered: auto-save failed");
+        }
     }
 };
+
+// Connection must not outlive the ConfigStore it was created from.
+class Connection
+{
+    ConfigStore *store_{nullptr};
+    size_t id_{0};
+    bool active_{false};
+
+  public:
+    Connection() = default;
+    Connection(ConfigStore &store, size_t id) : store_(&store), id_(id), active_(true)
+    {
+    }
+    ~Connection()
+    {
+        disconnect();
+    }
+    Connection(const Connection &)            = delete;
+    Connection &operator=(const Connection &) = delete;
+    Connection(Connection &&o) noexcept : store_(o.store_), id_(o.id_), active_(o.active_)
+    {
+        o.active_ = false;
+    }
+    Connection &operator=(Connection &&o) noexcept
+    {
+        if (this != &o)
+        {
+            disconnect();
+            store_    = o.store_;
+            id_       = o.id_;
+            active_   = o.active_;
+            o.active_ = false;
+        }
+        return *this;
+    }
+    void disconnect()
+    {
+        if (active_ && store_)
+        {
+            store_->disconnect(id_);
+            active_ = false;
+        }
+    }
+    size_t id() const
+    {
+        return id_;
+    }
+    bool connected() const
+    {
+        return active_;
+    }
+};
+
+inline Connection ConfigStore::connect(const std::string &key, const std::function<void(const json &)> &callback)
+{
+    std::unique_lock lock(mutex_);
+    const size_t id = next_listener_id_++;
+    listeners_.push_back({id, key, callback});
+    return Connection(*this, id);
+}
+
+template <typename T>
+    requires JsonReadable<T>
+inline Connection ConfigStore::on_change(const std::string &key, std::function<void(const T &)> callback)
+{
+    return connect(key, [cb = std::move(callback)](const nlohmann::json &j) {
+        try
+        {
+            cb(j.get<T>());
+        }
+        catch (...)
+        {
+        }
+    });
+}
 
 namespace detail
 {
@@ -709,12 +1263,12 @@ inline std::mutex &get_mutex()
  * @param path File path for the configuration.
  * @param type Strategy for resolving the file path.
  * @param save_strategy Strategy for saving changes.
- * @param get_strategy Strategy for handling missing keys.
+ * @param missing_key_policy Strategy for handling missing keys.
  * @return Reference to the ConfigStore instance.
  */
 inline ConfigStore &get_store(std::string_view path, Path type = Path::Relative,
-                              SaveStrategy save_strategy = SaveStrategy::Auto,
-                              GetStrategy get_strategy   = GetStrategy::DefaultValue)
+                              SaveStrategy save_strategy          = SaveStrategy::Auto,
+                              MissingKeyPolicy missing_key_policy = MissingKeyPolicy::DefaultValue)
 {
     std::lock_guard<std::mutex> lock(registry::get_mutex());
     auto &stores = registry::get_stores();
@@ -723,8 +1277,39 @@ inline ConfigStore &get_store(std::string_view path, Path type = Path::Relative,
     {
         std::string path_str(path);
         auto [new_it, inserted] =
-            stores.emplace(path_str, std::make_shared<ConfigStore>(path_str, type, save_strategy, get_strategy));
+            stores.emplace(path_str, std::make_shared<ConfigStore>(path_str, type, save_strategy, missing_key_policy));
         it = new_it;
+    }
+    else
+    {
+        if (it->second->path_type() != type)
+        {
+            throw std::logic_error(std::format("get_store(\"{}\") already cached with a different path type", path));
+        }
+    }
+    return *it->second;
+}
+
+/**
+ * @brief Retrieves or creates a ConfigStore instance using a StoreOptions bundle.
+ *
+ * Instances are cached by path. If an entry already exists the cached instance
+ * is returned unchanged (options are only applied on first construction).
+ *
+ * @param path File path for the configuration.
+ * @param opts Options struct specifying all store settings.
+ * @return Reference to the ConfigStore instance.
+ */
+inline ConfigStore &get_store(std::string_view path, StoreOptions opts)
+{
+    std::lock_guard<std::mutex> lock(registry::get_mutex());
+    auto &stores = registry::get_stores();
+    auto it      = stores.find(path);
+    if (it == stores.end())
+    {
+        std::string path_str(path);
+        auto [new_it, inserted] = stores.emplace(path_str, std::make_shared<ConfigStore>(path_str, opts));
+        it                      = new_it;
     }
     return *it->second;
 }
@@ -732,6 +1317,34 @@ inline ConfigStore &get_store(std::string_view path, Path type = Path::Relative,
 inline ConfigStore &get_default_store()
 {
     return get_store("config.json");
+}
+
+/**
+ * @brief Removes a specific store from the global registry by its file path.
+ *
+ * After this call the shared_ptr for that store is released; any existing
+ * references to the store obtained before this call remain valid until they
+ * go out of scope.
+ *
+ * @param path The file path key used when the store was registered.
+ * @return true if the entry was found and removed, false if not present.
+ */
+inline bool release_store(std::string_view path)
+{
+    std::lock_guard<std::mutex> lock(registry::get_mutex());
+    return registry::get_stores().erase(std::string(path)) > 0;
+}
+
+/**
+ * @brief Removes all stores from the global registry.
+ *
+ * Existing references to previously-retrieved stores remain valid until they
+ * go out of scope.
+ */
+inline void release_all_stores()
+{
+    std::lock_guard<std::mutex> lock(registry::get_mutex());
+    registry::get_stores().clear();
 }
 
 /**
@@ -749,18 +1362,18 @@ inline SaveStrategy get_save_strategy()
     return get_default_store().get_save_strategy();
 }
 /**
- * @brief Global convenience function: Sets get strategy for the default store.
+ * @brief Global convenience function: Sets missing key policy for the default store.
  */
-inline void set_get_strategy(const GetStrategy strategy)
+inline void set_missing_key_policy(const MissingKeyPolicy policy)
 {
-    get_default_store().set_get_strategy(strategy);
+    get_default_store().set_missing_key_policy(policy);
 }
 /**
- * @brief Global convenience function: Gets get strategy of the default store.
+ * @brief Global convenience function: Gets missing key policy of the default store.
  */
-inline GetStrategy get_get_strategy()
+inline MissingKeyPolicy missing_key_policy()
 {
-    return get_default_store().get_get_strategy();
+    return get_default_store().missing_key_policy();
 }
 
 /**
@@ -780,16 +1393,23 @@ template <typename T> T get(std::string_view key)
 /**
  * @brief Global convenience function: Sets a value in the default store.
  */
-template <typename T> [[nodiscard]] bool set(std::string_view key, const T &value, Obfuscate obf = Obfuscate::None)
+template <typename T> void set(std::string_view key, const T &value, Encoding encoding = Encoding::None)
 {
-    return get_default_store().set(key, value, obf);
+    get_default_store().set(key, value, encoding);
+}
+/**
+ * @brief Global convenience function: Atomically reads or initializes a key in the default store.
+ */
+template <typename T> inline T get_or_set(std::string_view key, const T &dv)
+{
+    return get_default_store().get_or_set<T>(key, dv);
 }
 /**
  * @brief Global convenience function: Removes a key from the default store.
  */
-[[nodiscard]] inline bool remove(std::string_view key)
+inline void remove(std::string_view key)
 {
-    return get_default_store().remove(key);
+    get_default_store().remove(key);
 }
 /**
  * @brief Global convenience function: Checks if a key exists in the default store.
@@ -823,9 +1443,9 @@ inline void reload()
 /**
  * @brief Global convenience function: Clears the default store.
  */
-[[nodiscard]] inline bool clear()
+inline void clear()
 {
-    return get_default_store().clear();
+    get_default_store().clear();
 }
 
 /**
@@ -849,6 +1469,81 @@ inline JsonFormat get_format()
 inline std::string get_store_path()
 {
     return get_default_store().get_store_path();
+}
+
+/**
+ * @brief Global convenience function: Gets the root of the default store as T, with a default fallback.
+ */
+template <typename T> inline T get_root(const T &dv)
+{
+    return get_default_store().get_root<T>(dv);
+}
+/**
+ * @brief Global convenience function: Gets the root of the default store as T.
+ */
+template <typename T> inline T get_root()
+{
+    return get_default_store().get_root<T>();
+}
+/**
+ * @brief Global convenience function: Sets the root of the default store.
+ */
+template <typename T> inline void set_root(const T &v)
+{
+    get_default_store().set_root(v);
+}
+/**
+ * @brief Global convenience function: Gets the file path of the default store as std::filesystem::path.
+ */
+inline std::filesystem::path path()
+{
+    return get_default_store().path();
+}
+
+/**
+ * @brief Global convenience function: Returns immediate child key names from the default store.
+ */
+inline std::vector<std::string> keys(std::string_view prefix = "")
+{
+    return get_default_store().keys(prefix);
+}
+/**
+ * @brief Global convenience function: Alias for keys() on the default store.
+ */
+inline std::vector<std::string> children(std::string_view prefix = "")
+{
+    return get_default_store().children(prefix);
+}
+
+/**
+ * @brief Global convenience function: Registers a validator on the default store.
+ */
+inline void set_validator(std::function<void(const ConfigStore::json &)> v)
+{
+    get_default_store().set_validator(std::move(v));
+}
+/**
+ * @brief Global convenience function: Removes the validator from the default store.
+ */
+inline void clear_validator()
+{
+    get_default_store().clear_validator();
+}
+
+/**
+ * @brief Global convenience function: Deep-merges a JSON object into the default store.
+ */
+inline void merge(const nlohmann::json &overlay)
+{
+    get_default_store().merge(overlay);
+}
+
+/**
+ * @brief Global convenience function: Loads a JSON file and merges it into the default store.
+ */
+inline void merge_file(const std::string &path, Path type = Path::Relative)
+{
+    get_default_store().merge_file(path, type);
 }
 
 } // namespace config

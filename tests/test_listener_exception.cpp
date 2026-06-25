@@ -9,7 +9,7 @@ TEST(ListenerTest, GetValueException)
     store.set("key", "val");
 
     bool called = false;
-    store.connect("key", [&](const nlohmann::json &j) {
+    auto conn   = store.connect("key", [&](const nlohmann::json &j) {
         called = true;
         EXPECT_TRUE(j.is_null()); // json() constructor creates null
     });

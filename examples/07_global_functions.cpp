@@ -42,7 +42,7 @@ int main()
     config::save(); // 手动保存
 
     // 设置 Get 策略
-    config::set_get_strategy(config::GetStrategy::ThrowException);
+    config::set_missing_key_policy(config::MissingKeyPolicy::ThrowException);
     try
     {
         auto missing = config::get<std::string>("missing_key");
