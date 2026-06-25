@@ -763,7 +763,34 @@ class ConfigStore
     {
         if (key.empty())
         {
-            return false;
+            std::string error_msg;
+            {
+                std::unique_lock lock(mutex_);
+                try
+                {
+                    nlohmann::json new_root = nlohmann::json(value);
+                    if (!new_root.is_object())
+                    {
+                        return false;
+                    }
+                    data_ = std::move(new_root);
+                    obfuscation_map_.clear();
+                }
+                catch (const std::exception &e)
+                {
+                    error_msg = std::format("Config set root failed: {} ({}:{}:{})", e.what(), location.file_name(),
+                                            location.line(), location.function_name());
+                }
+            }
+            if (!error_msg.empty())
+            {
+                throw std::runtime_error(error_msg);
+            }
+            if (save_strategy_ == SaveStrategy::Auto)
+            {
+                return save();
+            }
+            return true;
         }
 
         std::string error_msg;

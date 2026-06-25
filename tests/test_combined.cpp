@@ -10,6 +10,13 @@
 // Core Tests
 // ==========================================
 
+struct RootCfg
+{
+    std::string name;
+    int value;
+};
+CONFIG_STRUCT(RootCfg, name, value)
+
 class CoreTest : public ::testing::Test
 {
   protected:
@@ -95,13 +102,28 @@ TEST_F(CoreTest, TypeMismatch)
 // 6. Empty Keys
 TEST_F(CoreTest, EmptyKeys)
 {
-    // Set empty key
-    // Implementation check: if (key.empty()) return false;
+    // set("", primitive) returns false — primitives cannot replace root
     EXPECT_FALSE(store->set("", "value"));
+    EXPECT_FALSE(store->set("", 42));
 
-    // Get empty key
-    // Implementation check: if (key.empty()) return default;
+    // get(key, default_value) with empty key returns default when root is empty
     EXPECT_EQ(store->get<std::string>("", "fallback"), "fallback");
+}
+
+// 6b. Root round-trip: write a struct to root, read it back
+TEST_F(CoreTest, RootRoundTrip)
+{
+    RootCfg original{"hello", 99};
+    EXPECT_TRUE(store->set("", original));
+    EXPECT_TRUE(store->contains(""));
+
+    auto loaded = store->get<RootCfg>("");
+    EXPECT_EQ(loaded.name, "hello");
+    EXPECT_EQ(loaded.value, 99);
+
+    // Individual keys are also accessible after set("")
+    EXPECT_EQ(store->get<std::string>("name"), "hello");
+    EXPECT_EQ(store->get<int>("value"), 99);
 }
 
 // 7. Invalid JSON Pointers (Edge Case)
