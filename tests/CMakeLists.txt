@@ -13,7 +13,8 @@ enable_testing()
 
 function(add_config_test name source)
   add_executable(${name} ${source})
-  target_link_libraries(${name} PRIVATE config::config GTest::gtest_main)
+  target_link_libraries(${name} PRIVATE config::config GTest::gtest_main
+                                        GTest::gmock)
   add_test(NAME ${name} COMMAND ${name})
 endfunction()
 

@@ -135,6 +135,23 @@ class ConfigStore
         }
     }
 
+    static void collect_keys(const json &node, const std::string &prefix, std::vector<std::string> &out)
+    {
+        if (node.is_object())
+        {
+            for (const auto &[k, v] : node.items())
+            {
+                const std::string path = prefix.empty() ? k : prefix + "/" + k;
+                collect_keys(v, path, out);
+            }
+        }
+        else
+        {
+            if (!prefix.empty())
+                out.push_back(prefix);
+        }
+    }
+
     void apply_single_env(const std::string &entry)
     {
         const auto eq = entry.find('=');
@@ -1089,6 +1106,57 @@ class ConfigStore
     }
 
     /**
+     * @brief Recursively returns all leaf key paths in the configuration.
+     *
+     * Unlike keys() / children(), which return only the immediate children of one
+     * level, this method descends the entire JSON tree and collects every path that
+     * leads to a non-object value (scalar, array, or null).  Arrays are treated as
+     * leaf nodes — their elements are not recursed into.
+     *
+     * @param prefix Empty string to start from the root, or a key / JSON Pointer
+     *               path to start from a sub-tree.  Results are returned as full
+     *               paths (e.g., "server/host"), not relative to the prefix.
+     * @return Lexically unordered vector of all leaf paths.
+     */
+    [[nodiscard]] std::vector<std::string> all_keys(std::string_view prefix = "") const
+    {
+        std::shared_lock lock(mutex_);
+        std::vector<std::string> result;
+        if (prefix.empty())
+        {
+            collect_keys(data_, "", result);
+        }
+        else
+        {
+            const std::string ptr_str = (prefix.front() == '/') ? std::string(prefix) : "/" + std::string(prefix);
+            try
+            {
+                const auto &node = data_.at(nlohmann::json::json_pointer(ptr_str));
+                collect_keys(node, std::string(prefix), result);
+            }
+            catch (...)
+            {
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @brief Serializes the current in-memory configuration to a JSON string.
+     *
+     * Returns the decrypted, live representation of the store — the same data
+     * that get() reads.  Unlike save(), nothing is written to disk.
+     *
+     * @param format Pretty (indented) or Compact (minified) output.
+     * @return JSON string of the current configuration.
+     */
+    [[nodiscard]] std::string dump(JsonFormat format = JsonFormat::Pretty) const
+    {
+        std::shared_lock lock(mutex_);
+        return format == JsonFormat::Pretty ? data_.dump(4) : data_.dump();
+    }
+
+    /**
      * @brief Deep-merges a JSON object into the current configuration data.
      *
      * Nested objects are merged recursively; scalar and array values are
@@ -1564,6 +1632,20 @@ inline std::vector<std::string> keys(std::string_view prefix = "")
 inline std::vector<std::string> children(std::string_view prefix = "")
 {
     return get_default_store().children(prefix);
+}
+/**
+ * @brief Global convenience function: Returns all leaf key paths from the default store.
+ */
+[[nodiscard]] inline std::vector<std::string> all_keys(std::string_view prefix = "")
+{
+    return get_default_store().all_keys(prefix);
+}
+/**
+ * @brief Global convenience function: Serializes the default store to a JSON string.
+ */
+[[nodiscard]] inline std::string dump(JsonFormat format = JsonFormat::Pretty)
+{
+    return get_default_store().dump(format);
 }
 
 /**

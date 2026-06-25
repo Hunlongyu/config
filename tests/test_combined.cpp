@@ -2,6 +2,7 @@
 #include <config/config.hpp>
 #include <filesystem>
 #include <fstream>
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <thread>
 #include <vector>
@@ -1023,4 +1024,152 @@ TEST_F(PersistenceTest, AppDataCreation)
 
     // 5. Verify it exists now.
     EXPECT_TRUE(std::filesystem::exists(app_data_dir));
+}
+
+// ==========================================
+// all_keys() Tests
+// ==========================================
+
+struct AllKeysTest : ::testing::Test
+{
+    std::string path = std::filesystem::temp_directory_path().string() + "/test_all_keys.json";
+    void TearDown() override
+    {
+        std::filesystem::remove(path);
+    }
+};
+
+TEST_F(AllKeysTest, FlatKeys)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("a", 1);
+    store.set("b", 2);
+    store.set("c", 3);
+
+    auto keys = store.all_keys();
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_THAT(keys, ::testing::UnorderedElementsAre("a", "b", "c"));
+}
+
+TEST_F(AllKeysTest, NestedKeys)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("server/host", std::string("localhost"));
+    store.set("server/port", 8080);
+    store.set("db/url", std::string("sqlite://"));
+
+    auto keys = store.all_keys();
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_THAT(keys, ::testing::UnorderedElementsAre("server/host", "server/port", "db/url"));
+}
+
+TEST_F(AllKeysTest, DeeplyNested)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("a/b/c/d", 42);
+    store.set("a/b/e", std::string("hello"));
+    store.set("x", true);
+
+    auto keys = store.all_keys();
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_THAT(keys, ::testing::UnorderedElementsAre("a/b/c/d", "a/b/e", "x"));
+}
+
+TEST_F(AllKeysTest, WithPrefix)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("server/host", std::string("localhost"));
+    store.set("server/port", 8080);
+    store.set("server/tls/enabled", true);
+    store.set("db/url", std::string("sqlite://"));
+
+    auto keys = store.all_keys("server");
+    ASSERT_EQ(keys.size(), 3u);
+    EXPECT_THAT(keys, ::testing::UnorderedElementsAre("server/host", "server/port", "server/tls/enabled"));
+}
+
+TEST_F(AllKeysTest, MissingPrefix)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("a", 1);
+
+    auto keys = store.all_keys("nonexistent");
+    EXPECT_TRUE(keys.empty());
+}
+
+TEST_F(AllKeysTest, EmptyStore)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    EXPECT_TRUE(store.all_keys().empty());
+}
+
+TEST_F(AllKeysTest, ArrayTreatedAsLeaf)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("items", std::vector<int>{1, 2, 3});
+    store.set("name", std::string("test"));
+
+    auto keys = store.all_keys();
+    ASSERT_EQ(keys.size(), 2u);
+    EXPECT_THAT(keys, ::testing::UnorderedElementsAre("items", "name"));
+}
+
+// ==========================================
+// dump() Tests
+// ==========================================
+
+struct DumpTest : ::testing::Test
+{
+    std::string path = std::filesystem::temp_directory_path().string() + "/test_dump.json";
+    void TearDown() override
+    {
+        std::filesystem::remove(path);
+    }
+};
+
+TEST_F(DumpTest, PrettyContainsKeyAndValue)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("greeting", std::string("hello"));
+
+    auto s = store.dump();
+    EXPECT_NE(s.find("\"greeting\""), std::string::npos);
+    EXPECT_NE(s.find("\"hello\""), std::string::npos);
+}
+
+TEST_F(DumpTest, PrettyIsIndented)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("key", 1);
+
+    auto s = store.dump(config::JsonFormat::Pretty);
+    EXPECT_NE(s.find('\n'), std::string::npos);
+}
+
+TEST_F(DumpTest, CompactHasNoNewlines)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set("key", 1);
+
+    auto s = store.dump(config::JsonFormat::Compact);
+    EXPECT_EQ(s.find('\n'), std::string::npos);
+}
+
+TEST_F(DumpTest, DoesNotWriteToDisk)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set_save_strategy(config::SaveStrategy::Manual);
+    store.set("key", 42);
+
+    store.dump();
+    EXPECT_FALSE(std::filesystem::exists(path));
+}
+
+TEST_F(DumpTest, EmptyStoreReturnsEmptyObject)
+{
+    config::ConfigStore store(path, config::Path::Absolute);
+    store.set_save_strategy(config::SaveStrategy::Manual);
+
+    auto s = store.dump(config::JsonFormat::Compact);
+    EXPECT_EQ(s, "{}");
 }
