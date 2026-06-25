@@ -332,7 +332,7 @@ TEST_F(AdvancedTest, ListenerException)
 {
     auto store = std::make_unique<config::ConfigStore>("test_adv.json");
 
-    store->connect("key", [](const nlohmann::json &) { throw std::runtime_error("Listener failed"); });
+    auto conn = store->connect("key", [](const nlohmann::json &) { throw std::runtime_error("Listener failed"); });
 
     // Set should not crash even if listener throws
     EXPECT_NO_THROW(store->set("key", "val"));

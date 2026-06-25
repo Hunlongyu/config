@@ -261,10 +261,6 @@ class ConfigStore
             data_ = json::object();
         }
         apply_env_overrides();
-        if (validator_)
-        {
-            validator_(data_); // throws on invalid — let the exception propagate
-        }
     }
 
     void notify(std::string_view key, [[maybe_unused]] const json &val) const
@@ -848,11 +844,36 @@ class ConfigStore
 
     /**
      * @brief Reloads configuration from disk, discarding current memory state.
+     *
+     * The validator (if set) is called outside the internal mutex so that it can
+     * safely call back into this store (e.g., get()).  If the validator throws the
+     * previous data is restored before the exception propagates.
      */
     void reload()
     {
-        std::unique_lock lock(mutex_);
-        load();
+        json old_data;
+        json snapshot;
+        std::function<void(const json &)> val;
+        {
+            std::unique_lock lock(mutex_);
+            old_data = data_;
+            load();
+            snapshot = data_;
+            val      = validator_;
+        }
+        if (val)
+        {
+            try
+            {
+                val(snapshot);
+            }
+            catch (...)
+            {
+                std::unique_lock lock(mutex_);
+                data_ = std::move(old_data);
+                throw;
+            }
+        }
     }
 
     /**
@@ -920,23 +941,31 @@ class ConfigStore
         requires JsonReadable<T> && JsonWritable<T>
     T get_or_set(std::string_view key, const T &default_value)
     {
-        std::unique_lock lock(mutex_);
+        if (key.empty())
+            throw std::invalid_argument("get_or_set() requires a non-empty key");
+
         const std::string ptr_str = (key.front() == '/') ? std::string(key) : "/" + std::string(key);
         const nlohmann::json::json_pointer ptr(ptr_str);
-        if (data_.contains(ptr))
+
         {
-            try
+            std::unique_lock lock(mutex_);
+            if (data_.contains(ptr))
             {
-                return data_.at(ptr).get<T>();
+                try
+                {
+                    return data_.at(ptr).get<T>();
+                }
+                catch (...)
+                {
+                }
             }
-            catch (...)
-            {
-            }
+            data_[ptr] = default_value;
         }
-        data_[ptr] = default_value;
+
+        notify(key, json(default_value));
+
         if (save_strategy_ == SaveStrategy::Auto)
         {
-            lock.unlock();
             if (!save())
                 throw SaveError("get_or_set: auto-save failed for key '" + std::string(key) + "'");
         }
@@ -1118,6 +1147,10 @@ class ConfigStore
      */
     void load_layered(const std::vector<std::string> &paths, Path type = Path::Relative)
     {
+        // Parse all files outside the lock: non-existent and unparseable files are
+        // silently skipped so a corrupt optional layer does not block loading.
+        std::vector<json> layers;
+        layers.reserve(paths.size());
         for (const auto &p : paths)
         {
             const std::string abs = detail::PathResolver::resolve(p, type);
@@ -1128,16 +1161,27 @@ class ConfigStore
                 json layer_data;
                 std::ifstream f(abs);
                 f >> layer_data;
-                {
-                    std::unique_lock lock(mutex_);
-                    deep_merge(data_, layer_data);
-                }
+                layers.push_back(std::move(layer_data));
             }
             catch (...)
             {
             }
         }
-        if (save_strategy_ == SaveStrategy::Auto)
+
+        // Merge all layers in a single lock acquisition so no intermediate state is
+        // observable to concurrent readers.  Re-apply env overrides last so they
+        // always win over any layer value.  Read save_strategy_ while the lock is
+        // still held to avoid a data race with set_save_strategy().
+        bool should_save = false;
+        {
+            std::unique_lock lock(mutex_);
+            for (auto &layer_data : layers)
+                deep_merge(data_, layer_data);
+            if (!layers.empty())
+                apply_env_overrides();
+            should_save = (save_strategy_ == SaveStrategy::Auto);
+        }
+        if (should_save)
         {
             if (!save())
                 throw SaveError("load_layered: auto-save failed");
@@ -1310,6 +1354,13 @@ inline ConfigStore &get_store(std::string_view path, StoreOptions opts)
         std::string path_str(path);
         auto [new_it, inserted] = stores.emplace(path_str, std::make_shared<ConfigStore>(path_str, opts));
         it                      = new_it;
+    }
+    else
+    {
+        if (it->second->path_type() != opts.path_type)
+        {
+            throw std::logic_error(std::format("get_store(\"{}\") already cached with a different path type", path));
+        }
     }
     return *it->second;
 }
