@@ -88,3 +88,147 @@ config::set("theme", "Dark"); // 触发回调
 [源码: examples/07_global_functions.cpp](../examples/07_global_functions.cpp)
 
 演示便捷的全局 API 封装。
+
+## 8. 并发访问 (Concurrent Access)
+[源码: examples/08_concurrent_access.cpp](../examples/08_concurrent_access.cpp)
+
+演示多线程同时对 `ConfigStore` 进行线程安全的读写操作，使用 `SaveStrategy::Manual` 避免磁盘 I/O，专注于并发正确性验证。
+
+```cpp
+#include <config/config.hpp>
+#include <iostream>
+#include <thread>
+#include <vector>
+
+int main()
+{
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+    std::cout << "=== 并发访问演示 ===" << std::endl;
+
+    // 使用 Manual 策略避免磁盘 I/O，专注演示线程安全性
+    auto store = config::ConfigStore("08_concurrent.json", config::Path::Relative, config::SaveStrategy::Manual);
+
+    // 初始化共享数据
+    store.set("counter", 0);
+    store.set("message", std::string("hello"));
+    store.set("read_count", 0);
+
+    std::cout << "\n=== 启动读写线程 ===" << std::endl;
+
+    // 创建 5 个读线程
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 5; ++i)
+    {
+        readers.emplace_back([&store, i]() {
+            for (int j = 0; j < 10; ++j)
+            {
+                [[maybe_unused]] auto counter = store.get<int>("counter");
+                [[maybe_unused]] auto message = store.get<std::string>("message");
+                // 模拟一些处理时间
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            std::cout << "读线程 " << i << " 完成\n";
+        });
+    }
+
+    // 创建 1 个写线程
+    std::thread writer([&store]() {
+        for (int i = 1; i <= 10; ++i)
+        {
+            store.set("counter", i);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        std::cout << "写线程完成\n";
+    });
+
+    // 等待所有线程完成
+    writer.join();
+    for (auto &t : readers)
+    {
+        t.join();
+    }
+
+    std::cout << "\n=== 并发访问完成 ===" << std::endl;
+    std::cout << "最终计数器值: " << store.get<int>("counter") << "\n";
+    std::cout << "消息: " << store.get<std::string>("message") << "\n";
+    std::cout << "线程安全演示成功 — 无数据竞争！\n";
+
+    return 0;
+}
+```
+
+## 9. 结构体序列化 (Struct Serialization)
+[源码: examples/09_struct_serialization.cpp](../examples/09_struct_serialization.cpp)
+
+展示如何使用 `CONFIG_STRUCT` 和 `CONFIG_STRUCT_WITH_DEFAULT` 宏将 C++ 结构体绑定到 JSON，从而支持整体结构体的读取（`get_root`）和写入（`set_root`）。`CONFIG_STRUCT` 要求 JSON 中必须存在所有字段，而 `CONFIG_STRUCT_WITH_DEFAULT` 在字段缺失时会回退到结构体中定义的默认值。
+
+```cpp
+#include <config/config.hpp>
+#include <iostream>
+#include <vector>
+
+struct Item
+{
+    std::string name;
+    std::string value;
+};
+
+struct Config
+{
+    std::string app_name;
+    int version;
+    std::vector<Item> items;
+};
+
+// 严格绑定：JSON 中必须存在所有字段
+CONFIG_STRUCT(Item, name, value)
+CONFIG_STRUCT(Config, app_name, version, items)
+
+// 宽松绑定：缺失字段回退到结构体默认值
+struct ServerConfig
+{
+    std::string host = "localhost";
+    int port         = 8080;
+    bool tls         = false;
+};
+CONFIG_STRUCT_WITH_DEFAULT(ServerConfig, host, port, tls)
+
+int main()
+{
+    auto &store = config::get_store("example_struct.json", config::Path::Relative);
+
+    // 1. 逐字段写入（SaveStrategy::Auto 在每次 set 时自动保存）
+    store.set("app_name", "StructApp");
+    store.set("version", 1);
+    std::vector<Item> items = {{"item1", "value1"}, {"item2", "value2"}};
+    store.set("items", items);
+
+    // 2. 通过根键 "" 将数据读取为结构体
+    try
+    {
+        auto cfg = store.get_root<Config>();
+        std::cout << "App: " << cfg.app_name << " v" << cfg.version << "\n";
+        for (const auto &item : cfg.items)
+            std::cout << "  " << item.name << ": " << item.value << "\n";
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
+
+    // 3. 往返测试：将整个结构体写回根节点
+    Config updated{"StructApp", 2, {{"item3", "value3"}}};
+    store.set_root(updated);
+
+    // 4. CONFIG_STRUCT_WITH_DEFAULT：仅设置 "host"，port 和 tls 使用默认值
+    auto &srv = config::get_store("example_server.json", config::Path::Relative);
+    srv.set("host", std::string("example.com"));
+    auto sc = srv.get_root<ServerConfig>();
+    std::cout << "Server: " << sc.host << ":" << sc.port << (sc.tls ? " (TLS)" : "") << "\n";
+
+    return 0;
+}
+```

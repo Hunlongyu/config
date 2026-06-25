@@ -88,3 +88,147 @@ config::set("theme", "Dark"); // Triggers callback
 [Source: examples/07_global_functions.cpp](../examples/07_global_functions.cpp)
 
 Demonstrates the convenient global API wrappers.
+
+## 8. Concurrent Access
+[Source: examples/08_concurrent_access.cpp](../examples/08_concurrent_access.cpp)
+
+Demonstrates thread-safe reads and writes to a `ConfigStore` from multiple threads simultaneously, using `SaveStrategy::Manual` to avoid disk I/O and focus on concurrency correctness.
+
+```cpp
+#include <config/config.hpp>
+#include <iostream>
+#include <thread>
+#include <vector>
+
+int main()
+{
+#ifdef _WIN32
+    SetConsoleOutputCP(CP_UTF8);
+#endif
+    std::cout << "=== 并发访问演示 ===" << std::endl;
+
+    // 使用 Manual 策略避免磁盘 I/O，专注演示线程安全性
+    auto store = config::ConfigStore("08_concurrent.json", config::Path::Relative, config::SaveStrategy::Manual);
+
+    // 初始化共享数据
+    store.set("counter", 0);
+    store.set("message", std::string("hello"));
+    store.set("read_count", 0);
+
+    std::cout << "\n=== 启动读写线程 ===" << std::endl;
+
+    // 创建 5 个读线程
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 5; ++i)
+    {
+        readers.emplace_back([&store, i]() {
+            for (int j = 0; j < 10; ++j)
+            {
+                [[maybe_unused]] auto counter = store.get<int>("counter");
+                [[maybe_unused]] auto message = store.get<std::string>("message");
+                // 模拟一些处理时间
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            std::cout << "读线程 " << i << " 完成\n";
+        });
+    }
+
+    // 创建 1 个写线程
+    std::thread writer([&store]() {
+        for (int i = 1; i <= 10; ++i)
+        {
+            store.set("counter", i);
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        std::cout << "写线程完成\n";
+    });
+
+    // 等待所有线程完成
+    writer.join();
+    for (auto &t : readers)
+    {
+        t.join();
+    }
+
+    std::cout << "\n=== 并发访问完成 ===" << std::endl;
+    std::cout << "最终计数器值: " << store.get<int>("counter") << "\n";
+    std::cout << "消息: " << store.get<std::string>("message") << "\n";
+    std::cout << "线程安全演示成功 — 无数据竞争！\n";
+
+    return 0;
+}
+```
+
+## 9. Struct Serialization
+[Source: examples/09_struct_serialization.cpp](../examples/09_struct_serialization.cpp)
+
+Shows how to bind C++ structs to JSON using the `CONFIG_STRUCT` and `CONFIG_STRUCT_WITH_DEFAULT` macros, enabling whole-struct reads (`get_root`) and writes (`set_root`). `CONFIG_STRUCT` requires all fields to be present in the JSON, while `CONFIG_STRUCT_WITH_DEFAULT` falls back to struct-defined defaults for missing fields.
+
+```cpp
+#include <config/config.hpp>
+#include <iostream>
+#include <vector>
+
+struct Item
+{
+    std::string name;
+    std::string value;
+};
+
+struct Config
+{
+    std::string app_name;
+    int version;
+    std::vector<Item> items;
+};
+
+// Strict binding: all fields must be present in JSON
+CONFIG_STRUCT(Item, name, value)
+CONFIG_STRUCT(Config, app_name, version, items)
+
+// Tolerant binding: missing fields fall back to struct defaults
+struct ServerConfig
+{
+    std::string host = "localhost";
+    int port         = 8080;
+    bool tls         = false;
+};
+CONFIG_STRUCT_WITH_DEFAULT(ServerConfig, host, port, tls)
+
+int main()
+{
+    auto &store = config::get_store("example_struct.json", config::Path::Relative);
+
+    // 1. Write individual fields (SaveStrategy::Auto saves on each set)
+    store.set("app_name", "StructApp");
+    store.set("version", 1);
+    std::vector<Item> items = {{"item1", "value1"}, {"item2", "value2"}};
+    store.set("items", items);
+
+    // 2. Read back as a struct via root key ""
+    try
+    {
+        auto cfg = store.get_root<Config>();
+        std::cout << "App: " << cfg.app_name << " v" << cfg.version << "\n";
+        for (const auto &item : cfg.items)
+            std::cout << "  " << item.name << ": " << item.value << "\n";
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Error: " << e.what() << "\n";
+        return 1;
+    }
+
+    // 3. Round-trip: write a whole struct back to root
+    Config updated{"StructApp", 2, {{"item3", "value3"}}};
+    store.set_root(updated);
+
+    // 4. CONFIG_STRUCT_WITH_DEFAULT: only "host" is set, port and tls use defaults
+    auto &srv = config::get_store("example_server.json", config::Path::Relative);
+    srv.set("host", std::string("example.com"));
+    auto sc = srv.get_root<ServerConfig>();
+    std::cout << "Server: " << sc.host << ":" << sc.port << (sc.tls ? " (TLS)" : "") << "\n";
+
+    return 0;
+}
+```

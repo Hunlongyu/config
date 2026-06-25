@@ -1,0 +1,151 @@
+# Config
+
+> A modern, header-only C++20 configuration management library backed by nlohmann/json with a zero-boilerplate global API and a full-featured ConfigStore class.
+
+The library is entirely header-only — drop `include/config` onto your include path and `#include <config/config.hpp>`. The central type is `ConfigStore`, which wraps a single JSON file and exposes typed get/set, persistence strategies, layered loading, change listeners, and a background file watcher. A parallel set of global free functions (in the `config::` namespace) delegates to a lazily-created default store so simple programs need zero setup. All reads and writes are guarded by `std::shared_mutex` for lock-free concurrent reads and exclusive writes. Multiple named stores are managed through a thread-safe registry (`get_store()` / `get_default_store()`).
+
+## Core Types
+
+- `ConfigStore` — main class; one instance per JSON file
+- `Connection` — RAII handle returned by listener registration; auto-disconnects on destruction
+- `StoreOptions` — aggregate options bundle (`path_type`, `save`, `on_missing`, `format`, `env_prefix`)
+- `SaveError` — exception thrown when an auto-save disk write fails
+- `Path` (enum) — `Relative`, `Absolute`, `AppData`
+- `SaveStrategy` (enum) — `Auto` (save on every set), `Manual`
+- `MissingKeyPolicy` (enum) — `DefaultValue`, `ThrowException`
+- `JsonFormat` (enum) — `Pretty`, `Compact`
+- `Encoding` (enum) — `None`, `Base64`, `Hex`, `ROT13`, `Reverse`, `Combined`
+
+## Key APIs
+
+### ConfigStore construction
+
+- `ConfigStore(path, type, save, policy)` — positional constructor
+- `ConfigStore(path, StoreOptions)` — named-options constructor
+
+### Reading
+
+- `get<T>(key, default_value)` — read with fallback; returns default if key absent
+- `get<T>(key)` — read; behavior on missing key controlled by `MissingKeyPolicy`
+- `get_root<T>(default_value)` / `get_root<T>()` — deserialize the entire root
+- `get_or_set<T>(key, default_value)` — atomic read-or-initialize
+- `get_all<T>(prefix)` — returns `unordered_map<string, T>` of immediate children
+- `contains(key)` — returns `bool`; `[[nodiscard]]`
+- `sub(prefix)` — point-in-time `nlohmann::json` snapshot of a subtree
+- `all_keys(prefix)` — recursive leaf-key enumeration; `[[nodiscard]]`
+- `keys(prefix)` — immediate child keys (shallow)
+- `children(prefix)` — immediate child object keys
+- `dump(JsonFormat)` — serialize the whole store to a JSON string
+
+### Writing
+
+- `set(key, value)` — write a value; auto-saves if strategy is Auto; throws `SaveError` on failure
+- `set(key, value, Encoding)` — write with per-key obfuscation (stored encoded, read decoded)
+- `set_root<T>(value)` — overwrite the entire root with a serializable object
+- `remove(key)` — delete a key; throws `SaveError` on auto-save failure
+- `clear()` — delete all keys; throws `SaveError` on auto-save failure
+
+### Persistence & lifecycle
+
+- `save()` / `save(JsonFormat)` — flush to disk
+- `reload()` — re-read the file from disk (applies env overrides and defaults after load)
+- `merge(json)` — deep-merge a JSON object overlay
+- `merge_file(path, Path)` — deep-merge from a file
+- `load_layered(paths, Path)` — priority-ordered file stacking (later files win)
+
+### Change listeners
+
+- `connect(key, callback)` — raw `json` listener; returns `Connection`
+- `on_change<T>(key, callback)` — typed listener; returns `Connection`
+- `on_any_change(callback)` — wildcard raw listener; returns `Connection`
+- `on_any_change<T>(callback)` — wildcard typed listener; returns `Connection`
+
+### Background watcher & validation
+
+- `start_watch(interval)` — poll file for changes; calls `reload()` automatically (default 1 s)
+- `stop_watch()` — stop background watcher thread
+- `set_validator(fn)` — register a `void(const json&)` callback; throw inside it to reject config
+- `clear_validator()` — remove the validator
+
+### Defaults & environment
+
+- `set_default<T>(key, value)` — in-memory fallback; survives `reload()` and `clear()`
+- `clear_defaults()` — remove all registered defaults
+- `bind_env(key, env_var)` — map a specific environment variable to a config key
+
+### Global registry
+
+- `get_store(path, type, save, policy)` — retrieve-or-create a cached `ConfigStore`
+- `get_store(path, StoreOptions)` — retrieve-or-create with options bundle
+- `get_default_store()` — the implicit store used by global free functions
+- `release_store(path)` — remove one store from the cache
+- `release_all_stores()` — clear the entire registry
+
+## Usage Patterns
+
+### Global quick-start
+
+```cpp
+#include <config/config.hpp>
+
+config::set("server/host", std::string("127.0.0.1"));
+config::set("server/port", 8080);
+auto host = config::get<std::string>("server/host", "localhost");
+auto port = config::get<int>("server/port", 80);
+```
+
+No setup required. Writes to `config.json` in the working directory.
+
+### ConfigStore with options
+
+```cpp
+config::ConfigStore store("myapp/settings.json", {
+    .path_type  = config::Path::AppData,
+    .save       = config::SaveStrategy::Manual,
+    .env_prefix = "MYAPP_",   // MYAPP_SERVER_PORT -> server/port
+});
+store.set_default("server/port", 8080);
+store.set("server/port", 9090);
+store.save();
+```
+
+### Layered config (defaults → environment → local override)
+
+```cpp
+store.load_layered({
+    "config/defaults.json",
+    "config/production.json",
+    "config/local.json",      // silently skipped if absent
+});
+```
+
+### RAII change listener
+
+```cpp
+// Connection auto-disconnects when it goes out of scope.
+auto conn = store.on_change<int>("server/port", [](int port) {
+    std::cout << "Port changed to " << port << "\n";
+});
+store.set("server/port", 9090);  // fires the listener
+// conn destroyed here -> listener removed
+```
+
+### Obfuscated values
+
+```cpp
+store.set("auth/token", std::string("s3cr3t"), config::Encoding::Base64);
+// Stored as Base64 on disk; decoded transparently on get.
+auto token = store.get<std::string>("auth/token");
+```
+
+## Files
+
+| File | Contents |
+|---|---|
+| `include/config/config.hpp` | Public entry-point header — include this file |
+| `include/config/store.hpp` | Full `ConfigStore` implementation, `Connection`, `StoreOptions`, `SaveError`, global free functions, and the store registry |
+| `include/config/detail/types.hpp` | Enum definitions (`Path`, `SaveStrategy`, `MissingKeyPolicy`, `JsonFormat`, `Encoding`) and `CONFIG_STRUCT` / `CONFIG_STRUCT_WITH_DEFAULT` macros |
+| `include/config/detail/obfuscation.hpp` | `ObfuscationEngine` — encode/decode helpers for Base64, Hex, ROT13, Reverse, Combined |
+| `include/config/detail/path_resolver.hpp` | `resolve_path()` — platform-aware path resolution (Relative / Absolute / AppData) |
+| `docs/API_Reference.md` | Complete API reference with all overloads and parameter descriptions |
+| `docs/Examples.md` | Annotated usage examples covering all major features |
