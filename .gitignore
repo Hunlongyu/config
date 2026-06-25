@@ -365,3 +365,5 @@ FodyWeavers.xsd
 /build/
 /.trae/
 Testing/
+.superpowers/
+docs/superpowers/
