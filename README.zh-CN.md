@@ -4,12 +4,12 @@
 
 面向 C++20 应用的纯头文件 JSON 配置库。创建并持有 `config::Store`，指定配置文件，即可通过 nlohmann/json 读写指定类型的值。
 
-- **类型化读写**：支持基础类型和自定义结构体，可为缺失的键指定回退值。
+- **类型化读写**：支持标量数值受检读取、自定义结构体、可选查询和缺失键回退。
 - **保存策略**：支持自动或手动保存、数据校验、批量更新和原子文件替换。
 - **分层配置**：合并默认值、配置文件和环境变量覆盖。
 - **变更追踪**：提供作用域订阅和可选的文件监视器。
 
-> 当前版本为 [**0.2.1**](https://github.com/Hunlongyu/config/releases/tag/v0.2.1)。0.2 系列包含不兼容的 API 调整，已有应用请参阅 [0.1 → 0.2 迁移指南](docs/MIGRATION.zh-CN.md)。
+> 当前版本：[**0.2.2**](https://github.com/Hunlongyu/config/releases/tag/v0.2.2)。本次包含公开 API 变更，已有应用请按[迁移指南](docs/MIGRATION.zh-CN.md)调整。
 
 ## 快速开始
 
@@ -26,7 +26,7 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE config::config)
 ```
 
-该 target 自动传递 C++20 要求、头文件路径和平台依赖。CMake 优先复用已有的 `nlohmann_json::nlohmann_json` target，其次查找已安装的包，最后下载 JSON 3.11.3。安装包、离线依赖和手动复制头文件的用法见[构建与集成](docs/BUILD.zh-CN.md)。
+该 target 自动传递 C++20 要求、头文件路径和平台依赖。CMake 优先复用已有的 `nlohmann_json::nlohmann_json` target，其次查找已安装的包，最后下载 JSON 3.12.0。安装包、离线依赖和手动复制头文件的用法见[构建与集成](docs/BUILD.zh-CN.md)。
 
 ### 2. 读写配置
 
@@ -47,7 +47,10 @@ int main()
     });
     store.save();
     std::cout << store.get<int>("/server/port") << '\n';
-    return store.get_or<int>("/absent", 80) == 80 ? 0 : 1;
+    const auto fallback  = store.get<int>("/absent", 80);
+    const auto generated = store.get<int>("/absent", [] { return 80; });
+    const auto optional  = store.find<int>("/absent");
+    return fallback == 80 && generated == 80 && !optional ? 0 : 1;
 }
 ```
 <!-- /snippet -->
@@ -67,7 +70,9 @@ int main()
 | `/a~0b` | 名为 `a~b` 的属性 |
 | `/` | 名称为空的属性 |
 
-通过 `snapshot()` 读取根对象，通过 `update(fn)` 一次性修改可写层的根对象。`get<T>` 会报告缺失值和类型错误；`get_or<T>` **仅在键缺失时**使用回退值。
+通过 `snapshot()` 读取根对象，通过 `update(fn)` 一次性修改可写层的根对象。`get<T>(key)` 会报告缺失值和类型错误；第二个参数可传入回退值或无参生成函数，**仅在键缺失时**回退。生成函数同步执行，至多一次，不持有内部锁，其结果不会被写回配置。
+
+需要可选结果时使用 `find<T>(key)`：仅缺失返回 nullopt，类型错误仍抛错。读取结果使用 `std::string` 等拥有数据的类型。标量数值读取拒绝越界及小数转整数的截断，布尔回退必须为 bool。`erase(key)` 返回是否删除了可写值；可写键不存在时不改变存储、版本或 dirty 状态。
 
 读取时，配置来源按以下顺序合并，优先级从低到高：
 

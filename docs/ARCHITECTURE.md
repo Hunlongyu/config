@@ -7,6 +7,7 @@
 | Module | Responsibility |
 |---|---|
 | store.hpp | Small public facade, typed reads, writable operations. |
+| detail/value.hpp | Read-result constraints and checked scalar numeric conversions. |
 | options.hpp / error.hpp | Immutable construction options and structured failures. |
 | subscription.hpp / detail/observer.hpp | Independent subscription lifetime and ordered event queue. |
 | detail/state.hpp | Immutable committed snapshots, source resolution, validation and transaction commit. |
@@ -21,6 +22,10 @@ No src directory is required for this header-only library. There is no global de
 ## State and transactions
 
 Committed snapshots contain writable data, resolved file layers, sampled environment, the effective view, source bytes, revision and dirty state. Readers copy a shared snapshot handle under a short shared lock, then convert values outside locks.
+
+All three get overloads share one path parse and snapshot read. Missing-value factories and update callbacks are accepted as templates, so move-only captures work without type erasure; each runs synchronously once and is not retained. Fallbacks do not write configuration or reread/retry after a concurrent commit. Stored subscription, validation and watcher callbacks retain their existing owner-managed lifetimes.
+
+Find retains one snapshot through presence testing and conversion. Get/find reject direct borrowed result types, and scalar numeric conversions check bounds before casting; ordinary container/custom deserializers retain their own member-conversion contracts. Key-specific errors include the original pointer. An absent writable erase returns false before validation or commit, preserving revision, dirty state and storage.
 
 Writers prepare and validate candidates without internal locks. At commit, a writer mutex serializes the revision check, optional persistence and publication. A changed revision produces a conflict instead of overwriting newer state. User edit functions are never automatically retried. Save acquires the same mutex before taking its snapshot.
 
@@ -42,11 +47,12 @@ Each case owns a unique temporary directory. Tests never delete application-data
 
 | Suite | Acceptance |
 |---|---|
-| store | Types, structs, strict paths, empty/escaped keys, root updates, alias ownership. |
-| persistence | Automatic rollback, manual dirty state, corruption, serialization/write faults, Unicode paths, encoding migration. |
+| store | Types, structs, three get overloads, callback counts/exceptions, move-only captures, strict paths, view validation, root updates, alias ownership. |
+| reads | Compile-time result/fallback constraints, scalar numeric boundaries, optional lookup, owning results, structured key errors and snapshot lifetime under concurrent writes. |
+| persistence | Automatic rollback, manual dirty state, absent-erase no-ops, failed-erase rollback, corruption, serialization/write faults, Unicode paths, encoding migration. |
 | sources | Precedence, consistent views, environment isolation, shared codec, all-entry validation. |
 | subscriptions | All mutation events, ordering, reentrancy, disconnect, exception handling and destruction. |
-| concurrency | Gated save overlap, stale reload rejection, one-shot updates, exact parallel increment count. |
+| concurrency | Gated save overlap, stale reload/erase rejection, writes during fallback computation, one-shot updates, exact parallel increment count. |
 | watcher | Same-timestamp edits, retry, conflict, dirty-state protection, cancellation and lifetime. |
 | consumers | Independent public headers, multiple translation units, parent-provided dependencies, installed package and manual integration. |
 | examples / docs | Build and execute examples; compare README snippets against their compiled source and verify local links. |

@@ -12,6 +12,9 @@ int main()
     });
     store.save();
     std::cout << store.get<int>("/server/port") << '\n';
-    return store.get_or<int>("/absent", 80) == 80 ? 0 : 1;
+    const auto fallback  = store.get<int>("/absent", 80);
+    const auto generated = store.get<int>("/absent", [] { return 80; });
+    const auto optional  = store.find<int>("/absent");
+    return fallback == 80 && generated == 80 && !optional ? 0 : 1;
 }
 // snippet:end quick-start

@@ -1,6 +1,88 @@
 #include "test_support.hpp"
 using namespace config_test;
 
+TEST(Persistence, MissingEraseAndFindHaveNoSideEffects)
+{
+    TempDirectory dir;
+    auto backend    = std::make_shared<ControlledBackend>();
+    int validations = 0;
+    config::Store store(
+        dir.file(),
+        {.defaults = {{"default", 7}}, .validate = [&](const json &) { ++validations; }, .backend = backend});
+    int events                     = 0;
+    auto subscription              = store.subscribe([&](const auto &) { ++events; });
+    const auto initial_validations = validations;
+    backend->fail                  = true;
+    EXPECT_FALSE(store.erase("/absent"));
+    EXPECT_FALSE(store.erase("/default"));
+    EXPECT_EQ(store.find<int>("/default"), std::optional<int>{7});
+    EXPECT_EQ(store.find<int>("/absent"), std::nullopt);
+    EXPECT_EQ(store.revision(), 0u);
+    EXPECT_FALSE(store.dirty());
+    EXPECT_EQ(validations, initial_validations);
+    EXPECT_EQ(backend->writes, 0);
+    EXPECT_EQ(events, 0);
+    EXPECT_FALSE(std::filesystem::exists(dir.file()));
+}
+
+TEST(Persistence, MissingErasePreservesCleanAndDirtyManualState)
+{
+    TempDirectory dir;
+    auto backend = std::make_shared<ControlledBackend>();
+    config::Store store(dir.file(), {.save = config::SaveMode::manual, .backend = backend});
+    auto check_noop = [&] {
+        const auto revision = store.revision();
+        const auto dirty    = store.dirty();
+        const auto writes   = backend->writes.load();
+        const auto data     = store.snapshot();
+        EXPECT_FALSE(store.erase("/absent"));
+        EXPECT_EQ(store.revision(), revision);
+        EXPECT_EQ(store.dirty(), dirty);
+        EXPECT_EQ(backend->writes, writes);
+        EXPECT_EQ(store.snapshot(), data);
+    };
+    check_noop();
+    store.set("/value", 1);
+    check_noop();
+    store.save();
+    check_noop();
+    EXPECT_TRUE(store.erase("/value"));
+    EXPECT_TRUE(store.dirty());
+    EXPECT_EQ(backend->writes, 1);
+    check_noop();
+}
+
+TEST(Persistence, ErasePublishesOnlyAfterSuccessfulWrite)
+{
+    TempDirectory dir;
+    auto backend = std::make_shared<ControlledBackend>();
+    config::Store store(dir.file(), {.backend = backend});
+    store.set("/value", nullptr);
+    const auto revision = store.revision();
+    const auto disk     = read(dir.file());
+    int events          = 0;
+    auto subscription   = store.subscribe([&](const auto &) { ++events; });
+    backend->fail       = true;
+    EXPECT_FALSE(store.erase("/absent"));
+    expect_error(config::ErrorCode::write, [&] { store.erase("/value"); });
+    EXPECT_TRUE(store.contains("/value"));
+    EXPECT_EQ(store.revision(), revision);
+    EXPECT_FALSE(store.dirty());
+    EXPECT_EQ(read(dir.file()), disk);
+    EXPECT_EQ(events, 0);
+    backend->fail = false;
+    EXPECT_TRUE(store.erase("/value"));
+    EXPECT_EQ(store.revision(), revision + 1);
+    EXPECT_FALSE(store.dirty());
+    EXPECT_EQ(json::parse(read(dir.file())).at("values"), json::object());
+    EXPECT_EQ(events, 1);
+    const auto writes = backend->writes.load();
+    EXPECT_FALSE(store.erase("/value"));
+    EXPECT_EQ(backend->writes, writes);
+    EXPECT_EQ(store.revision(), revision + 1);
+    EXPECT_EQ(events, 1);
+}
+
 TEST(Persistence, AutomaticCommitsFileBeforeNotifying)
 {
     TempDirectory dir;
@@ -127,6 +209,22 @@ TEST(Persistence, UnicodeFilePathsAndCompactFormat)
     EXPECT_EQ(read(file).find('\n'), std::string::npos);
     config::Store store(file);
     EXPECT_EQ(store.get<std::string>("/value"), "你好🌍");
+}
+TEST(Persistence, FilesystemPathValuesPersistAsUtf8)
+{
+    TempDirectory dir;
+    const std::filesystem::path value(u8"目录/设置🌍.json");
+    const std::string expected = "目录/设置🌍.json";
+    {
+        config::Store store(dir.file());
+        store.set("/path", value);
+        EXPECT_EQ(store.get<std::string>("/path"), expected);
+        EXPECT_EQ(store.get<std::filesystem::path>("/path"), value);
+        EXPECT_EQ(json::parse(read(dir.file())).at("values").at("path"), expected);
+    }
+    config::Store reopened(dir.file());
+    EXPECT_EQ(reopened.get<std::string>("/path"), expected);
+    EXPECT_EQ(reopened.get<std::filesystem::path>("/path"), value);
 }
 TEST(Persistence, AllEncodingsRoundTripWithoutChangingReservedFields)
 {

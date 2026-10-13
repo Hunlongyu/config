@@ -1,4 +1,4 @@
-# API 参考 — 0.2
+# API 参考 — 0.2.2
 
 [English](API.md) · [首页](../README.zh-CN.md) · [迁移](MIGRATION.zh-CN.md)
 
@@ -13,12 +13,14 @@
 | 操作 | 契约 |
 |---|---|
 | `get<T>(pointer)` | 读取有效值，缺失报 missing，转换失败报 type。 |
-| `get_or<T>(pointer, fallback)` | 仅缺失时回退，类型错误和非法路径不回退。 |
-| `contains(pointer)` | 检查与 get、snapshot 相同的有效视图。 |
+| `get<T>(pointer, fallback)` | 仅缺失时返回回退值，类型错误和非法路径仍报错。 |
+| `get<T>(pointer, factory)` | 仅缺失时调用无参生成函数，并返回其结果。 |
+| `find<T>(pointer)` | 返回 `std::optional<T>`，仅缺失返回 nullopt；类型错误和非法路径仍抛错。 |
+| `contains(pointer)` | 检查与 get、find、snapshot 相同的有效视图。 |
 | `snapshot(View::effective)` | 返回包含全部配置层的根对象副本。 |
-| `snapshot(View::writable)` | 仅返回可写层副本。 |
+| `snapshot(View::writable)` | 仅返回可写层副本；非法 View 抛出 type。 |
 | `set(pointer, json, Encoding::none)` | 修改可写值；自定义类型使用 nlohmann 序列化。编码仅适用于字符串。 |
-| `erase(pointer)` | 删除可写值，可能重新显示低优先级值；不存在则不删除。 |
+| `erase(pointer)` | 成功删除可写值返回 true，可能重新显示低优先级值；可写层不存在则返回 false，不提交。 |
 | `update(fn)` | 修改可写根对象副本，统一校验并一次提交，根必须保持对象。 |
 | `merge(json)` | 对象递归合并，数组和标量整体替换。 |
 | `merge_file(path)` | 经过统一解码后合并；文件缺失报错。 |
@@ -31,7 +33,27 @@
 
 键是以 `/` 开头的非空 JSON Pointer。`~1` 转义斜杠，`~0` 转义波浪线；空属性段有效。禁止空指针，根操作使用 snapshot/update。数组寻址遵循 nlohmann JSON Pointer 语义。
 
-批量回调在内部锁外、针对候选副本执行一次；回调自身异常继续传播，JSON 路径操作错误转换成 config::Error。并发提交可能导致 conflict，库不会隐式重复用户函数。
+### 类型读取与回退
+
+`get` 和 `find` 均显式指定拥有数据、无 const/volatile 限定的值类型 `T`。引用、裸指针及范围视图（包括 `std::string_view` 和 `std::span`）在编译期拒绝。容器元素及自定义反序列化类型也必须拥有返回的数据；库无法检查任意类型内部的所有权。文本使用 `std::string`。读取和状态查询结果标记为 `[[nodiscard]]`。
+
+回退值必须能隐式转换为 `T`；布尔回退必须为 bool，数值回退必须为非 bool 的算术类型。生成函数的返回值遵循同样的规则，参数错误的回调不能通过隐式转换成为数值或布尔回退值。无参可调用对象始终作为生成函数处理，即使其自身也能转换为 `T`。例如 `get<bool>("/enabled", [] { return false; })` 在缺失时返回 false，而传入需要 int 参数的回调会编译失败。
+
+内置数值类型 `T` 采用受检转换：整数拒绝越界、负数转无符号数和小数截断；`42.0` 这样的整数值浮点数可以转换为整数。浮点结果允许正常舍入，但拒绝非有限值、溢出及下溢为零。布尔值与数值不互相转换。数值回退及生成函数结果仅在实际使用时接受同样的检查；转换拒绝时抛 `ErrorCode::type`。容器、枚举及自定义结构体仍使用 nlohmann 反序列化；需要受检数值行为时，在反序列化器中校验其成员转换。
+
+每次读取只使用一份有效快照。已有值（包括 JSON null）不会触发生成函数。null 按 `T` 的正常规则转换：`get<json>` 保留 null，`get<int>` 报类型错误。类型错误和非法路径不触发回退。
+
+`find<T>` 在同一份快照内判断存在性并转换，可区分缺失与恰好等于默认值的已存值，避免先 contains 再 get 的两次独立读取。`find<json>` 对 JSON null 返回有值的 optional；`find<int>` 对 null 抛错。查询不会写入、改变 revision/dirty 或发送事件。
+
+生成函数在调用线程同步执行，至多一次，执行时不持有内部锁。库不保存该函数，也不会因为并发修改键而重试。函数异常原样传播，不交给 `on_callback_error`。库不会写回回退结果、修改版本或发送事件。生成函数可以再次读取 Store；用户代码显式执行的修改仍遵循正常修改语义。
+
+值参数在进入 `get` 前就已求值；耗时计算应放入生成函数，只在缺失时执行。生成函数支持可变状态、只能移动的捕获及引用限定调用，无需转换成 `std::function`。
+
+### 批量修改
+
+`erase` 表示是否成功移除了可写层中存在的值。仅由默认值、文件层或环境提供的键不算可写值。可写键不存在时，跳过校验、持久化和发布，不改变 revision、dirty 或事件。存在时遵循正常事务规则，失败抛错而非返回 false。并发修改可能导致 conflict，不会隐式重试并删除更新后的值。
+
+`update(fn)` 同样直接接收可调用对象，支持只能移动的捕获。在内部锁外、针对候选副本执行一次 `fn(json&)`，不保存该函数。回调自身异常继续传播，JSON 路径操作错误转换成 config::Error。并发提交可能导致 conflict，库不会隐式重复用户函数。
 
 ## StoreOptions
 
@@ -56,11 +78,11 @@
 
 ## 错误与保存
 
-Error 继承 std::runtime_error；code() 和 file() 提供类型及相关文件。错误码包括 missing、type、path、read、parse、write、validation、conflict、in_use、format。
+Error 继承 std::runtime_error；code()、file() 和 key() 提供结构化上下文。与键相关的读取、转换及路径错误包含请求的 JSON Pointer（或原始非法输入）；没有具体键的错误返回空字符串。错误码包括 missing、type、path、read、parse、write、validation、conflict、in_use、format。
 
 自动修改顺序：准备 → 校验 → 持久化 → 提交 → 通知。读取、解析、校验、序列化、冲突或写入失败均不能发布候选状态和事件。手动模式先提交内存并标记 dirty；随后保存失败会保留这些明确未保存的修改。内存分配失败及用户回调异常遵循标准 C++ 异常语义。
 
-0.2 输出文件格式：
+文件继续使用 0.2 引入的 `config/v1` 格式：
 ```json
 {"$config":"config/v1","values":{"port":8080},"encoding":{}}
 ```
@@ -74,6 +96,8 @@ Change{revision, before, after} 表示一次已提交的有效视图变更。有
 
 必须保存订阅句柄。析构或 disconnect() 阻止后续回调开始，但不等待已经执行的回调。断开或 Store 销毁后 connected() 为 false。移动赋值会断开目标原先的订阅。
 
+默认构造的句柄未连接。活动句柄由 `Store::subscribe` 创建，内部槽位构造函数不再公开。
+
 事件按提交顺序在状态锁、写锁之外派发。回调可读取、修改、注册或取消订阅；重入事件排在当前批次之后。另一线程正在派发时，修改函数可以先于自身事件完成返回。回调运行于派发线程，UI 切线程由调用方处理。新订阅不会收到已排队事件。回调异常被隔离并交给 on_callback_error，其自身异常忽略。
 
 ## Watcher 与路径
@@ -83,6 +107,10 @@ Watcher(Store&, interval=1s, on_error={}) 轮询可写文件和文件层内容�
 stop() 可以中断轮询等待，无法中断已经运行的用户回调或文件操作。重复调用安全；并发停止时，一个调用方负责 join，其余可能提前返回。自身回调内析构时先取消再 detach，线程状态独立于 Watcher 对象。Watcher 可以比 Store 活得更久，也不会永久保留 Store。
 
 user_config_directory(application) 返回路径而不创建目录。application 必须是非空单级目录名。Windows 使用 LocalAppData，macOS 使用 ~/Library/Application Support，Linux 使用绝对 XDG_CONFIG_HOME 或 ~/.config。无法确定目录时报错，不静默回退当前目录。
+
+## 版本
+
+版本信息通过独立的 `<config/version.h>` 提供。`version()` 返回指向静态存储的 `constexpr std::string_view`，且为 `noexcept`；需要拥有副本时显式构造 `std::string`。
 
 ## Backend
 

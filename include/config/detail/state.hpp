@@ -143,22 +143,24 @@ class State
         return current_;
     }
 
-    template <class Edit> void mutate(Edit &&edit)
+    template <class Edit> bool mutate(Edit &&edit, std::string_view key = {})
     {
         const auto before = snapshot();
         auto candidate    = std::make_shared<Snapshot>(*before);
         try
         {
-            edit(candidate->writable);
+            if (!edit(candidate->writable))
+                return false;
         }
         catch (const json::exception &e)
         {
-            throw Error(ErrorCode::path, e.what(), file);
+            throw Error(ErrorCode::path, e.what(), file, std::string(key));
         }
         require_object(candidate->writable.values);
         candidate->dirty = true;
         resolve(*candidate);
         commit(before, std::move(candidate), options.save == SaveMode::automatic);
+        return true;
     }
 
     void reload(bool only_changed = false)

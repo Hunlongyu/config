@@ -11,7 +11,7 @@ if(NOT TARGET GTest::gtest_main)
   config_enable_sanitizer(gtest_main)
 endif()
 
-foreach(suite IN ITEMS store persistence sources subscriptions concurrency watcher)
+foreach(suite IN ITEMS store reads persistence sources subscriptions concurrency watcher)
   add_executable(test_${suite} test_${suite}.cpp)
   target_link_libraries(test_${suite} PRIVATE config::config GTest::gtest_main)
   config_development_target(test_${suite})

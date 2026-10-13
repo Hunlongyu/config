@@ -2,7 +2,9 @@
 
 [中文](BUILD.zh-CN.md) · [Home](../README.md)
 
-Requires a C++20 compiler, CMake 3.28+ for CMake integration, and nlohmann/json. The fetched JSON revision is 3.11.3. No Qt dependency.
+Requires a C++20 compiler, CMake 3.28+ for CMake integration, and nlohmann/json. The fetched JSON revision is 3.12.0. No Qt dependency.
+
+With JSON 3.12.0, `std::filesystem::path` configuration values are serialized as UTF-8 strings on every platform, including Windows.
 
 ## Build and test
 ```sh
@@ -29,10 +31,10 @@ cmake --install package --prefix install
 ```
 The default fetched dependency is installed with the library; the prefix includes public/detail headers, generated version.h, CMake package files, JSON, and both licenses under share/licenses/. With an externally supplied JSON package, consumers must also be able to find that package.
 ```cmake
-find_package(config 0.2 CONFIG REQUIRED)
+find_package(config 0.2.2 CONFIG REQUIRED)
 target_link_libraries(app PRIVATE config::config)
 ```
-Package compatibility is limited to the same minor version because 0.2 changes the API.
+CMake package matching is limited to the same minor version. Version 0.2.2 changes the `get` API; existing applications should follow the [migration guide](MIGRATION.md).
 
 ## Manual copying
 

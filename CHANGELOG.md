@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.2.2] - 2026-10-13
+
+### Breaking changes
+
+- Replace `get_or` with explicitly typed `get<T>` overloads for strict reads, fallback values and lazy factories; remove the old name without an alias.
+- Keep Subscription's internal slot constructor private; active handles come from `Store::subscribe`.
+- Require owning read results; reject direct pointer, reference and range-view return types.
+- Check scalar numeric reads and used numeric fallbacks for range errors and fractional-to-integer truncation; distinguish booleans from numbers.
+- Return bool from `erase` for an actual writable-layer removal, and return a constexpr string view from `version()`.
+
+### Added
+
+- Add `find<T>` for missing-only optional lookup within one snapshot, and `Error::key()` for key-specific failure context.
+- Mark read/status-query results nodiscard and cover compile-time constraints, numeric boundaries, concurrent lookup lifetime and erase transactions.
+
+### Changed
+
+- Upgrade the fetched nlohmann/json dependency and consumer fixtures from 3.11.3 to [3.12.0](https://github.com/nlohmann/json/releases/tag/v3.12.0).
+- Verify UTF-8 serialization and round-trip persistence of filesystem path values, including Chinese characters and emoji.
+- Accept move-only and reference-qualified callbacks directly in `get` factories and `update`.
+- Verify missing-only fallback, null handling, unchanged factory exceptions, reentrant reads and concurrent writes without retrying factories.
+
+### Fixed
+
+- Reject invalid snapshot views instead of silently returning writable data.
+- Reject wrong-signature callbacks that would otherwise become numeric/boolean fallback values through implicit conversion.
+- Skip validation, persistence, revision/dirty changes and events when erasing a missing writable key.
+
 ## [0.2.1] - 2026-10-13
 
 ### Fixed

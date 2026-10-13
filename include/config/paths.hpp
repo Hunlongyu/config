@@ -7,7 +7,7 @@
 
 namespace config
 {
-inline std::filesystem::path user_config_directory(const std::filesystem::path &application)
+[[nodiscard]] inline std::filesystem::path user_config_directory(const std::filesystem::path &application)
 {
     if (application.empty() || application.has_parent_path() || application == "." || application == "..")
         throw Error(ErrorCode::path, "Application must be a single directory name");

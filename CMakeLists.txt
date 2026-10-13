@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(config VERSION 0.2.1 LANGUAGES CXX)
+project(config VERSION 0.2.2 LANGUAGES CXX)
 include(cmake/DetectMsvcIncludes.cmake)
 
 option(CONFIG_FETCH_JSON "Fetch nlohmann_json when no target or package is supplied" ON)
@@ -19,7 +19,7 @@ if(NOT TARGET nlohmann_json::nlohmann_json AND CONFIG_FETCH_JSON)
   set(JSON_Install ON CACHE BOOL "Install JSON with the standalone package")
   FetchContent_Declare(json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3)
+    GIT_TAG v3.12.0)
   FetchContent_MakeAvailable(json)
   if(JSON_Install)
     set(config_json_license "${json_SOURCE_DIR}/LICENSE.MIT")

@@ -68,6 +68,28 @@ TEST(Concurrency, ReloadConflictNeverPublishesStaleCandidate)
     EXPECT_EQ(store.get<int>("/value"), 1);
     EXPECT_EQ(store.get<int>("/concurrent"), 99);
 }
+TEST(Concurrency, GetFactoryUsesOneSnapshotWithoutBlockingWritersOrRetrying)
+{
+    TempDirectory dir;
+    Gate fallback;
+    config::Store store(dir.file(), {.save = config::SaveMode::manual});
+    std::atomic<int> calls = 0;
+    auto reading           = std::async(std::launch::async, [&] {
+        return store.get<int>("/value", [&] {
+            ++calls;
+            fallback.block();
+            return 7;
+        });
+    });
+    ASSERT_TRUE(fallback.entered());
+    store.set("/value", 42);
+    const auto revision = store.revision();
+    fallback.release();
+    EXPECT_EQ(reading.get(), 7);
+    EXPECT_EQ(calls, 1);
+    EXPECT_EQ(store.get<int>("/value"), 42);
+    EXPECT_EQ(store.revision(), revision);
+}
 TEST(Concurrency, UpdateCallbackRunsOnceAndConflictIsExplicit)
 {
     TempDirectory dir;
@@ -90,6 +112,27 @@ TEST(Concurrency, UpdateCallbackRunsOnceAndConflictIsExplicit)
     EXPECT_EQ(calls, 1);
     EXPECT_FALSE(store.contains("/old"));
     EXPECT_EQ(store.get<int>("/new"), 2);
+}
+TEST(Concurrency, EraseDoesNotDeleteAConcurrentReplacement)
+{
+    TempDirectory dir;
+    Gate validation;
+    std::atomic<bool> armed = false;
+    config::Store store(dir.file(), {.save = config::SaveMode::manual, .validate = [&](const json &) {
+                                         if (armed.exchange(false))
+                                             validation.block();
+                                     }});
+    store.set("/value", 1);
+    armed        = true;
+    auto erasing = std::async(std::launch::async,
+                              [&] { expect_error(config::ErrorCode::conflict, [&] { store.erase("/value"); }); });
+    ASSERT_TRUE(validation.entered());
+    store.set("/value", 2);
+    const auto revision = store.revision();
+    validation.release();
+    erasing.get();
+    EXPECT_EQ(store.get<int>("/value"), 2);
+    EXPECT_EQ(store.revision(), revision);
 }
 TEST(Concurrency, ParallelUpdatesRetainEveryIncrementAndOrderedEvent)
 {
@@ -121,7 +164,7 @@ TEST(Concurrency, RegistrationCanRunAlongsideDispatch)
     auto registration = std::async(std::launch::async, [&] {
         for (int i = 0; i < 300; ++i)
         {
-            auto sub = store.subscribe([&](auto &) { store.snapshot(); });
+            auto sub = store.subscribe([&](auto &) { (void)store.snapshot(); });
         }
     });
     for (int i = 0; i < 100; ++i)

@@ -2,7 +2,9 @@
 
 [English](BUILD.md) · [首页](../README.zh-CN.md)
 
-需要支持 C++20 的编译器、CMake 3.28+（使用 CMake 时）及 nlohmann/json；自动获取的 JSON 版本为 3.11.3。不依赖 Qt。
+需要支持 C++20 的编译器、CMake 3.28+（使用 CMake 时）及 nlohmann/json；自动获取的 JSON 版本为 3.12.0。不依赖 Qt。
+
+使用 JSON 3.12.0 时，作为配置值保存的 `std::filesystem::path` 在所有平台（包括 Windows）均序列化为 UTF-8 字符串。
 
 ## 构建与测试
 ```sh
@@ -29,10 +31,10 @@ cmake --install package --prefix install
 ```
 默认获取的 JSON 随库安装。安装前缀包含公开和内部头、生成的 version.h、CMake 包文件、JSON，以及 share/licenses/ 下本库和 JSON 的许可证。外部提供 JSON 包时，消费方也需要能找到该包。
 ```cmake
-find_package(config 0.2 CONFIG REQUIRED)
+find_package(config 0.2.2 CONFIG REQUIRED)
 target_link_libraries(app PRIVATE config::config)
 ```
-由于 0.2 调整 API，包兼容范围限制为相同次版本。
+CMake 包匹配范围限制为相同次版本。0.2.2 调整了 `get` API，更新已有应用时请参阅[迁移指南](MIGRATION.zh-CN.md)。
 
 ## 手动复制
 

@@ -4,12 +4,12 @@
 
 A header-only JSON configuration library for C++20 applications. Own a `config::Store`, choose a file, and read or update typed values with nlohmann/json.
 
-- **Typed access** — read values and custom structs, with explicit fallbacks for missing keys.
+- **Typed access** — checked scalar numeric reads, custom structs, optional lookup and explicit fallbacks for missing keys.
 - **Controlled persistence** — automatic or manual saving, validation, batch updates and atomic file replacement.
 - **Layered configuration** — combine defaults, configuration files and environment overrides.
 - **Change tracking** — scoped subscriptions and an optional file watcher.
 
-> The current release is [**0.2.1**](https://github.com/Hunlongyu/config/releases/tag/v0.2.1). The 0.2 series changes the public API; existing applications should follow the [0.1 → 0.2 migration guide](docs/MIGRATION.md).
+> Current version: [**0.2.2**](https://github.com/Hunlongyu/config/releases/tag/v0.2.2). This release changes the public API; existing applications should follow the [migration guide](docs/MIGRATION.md).
 
 ## Quick start
 
@@ -26,7 +26,7 @@ add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE config::config)
 ```
 
-The target supplies C++20, include paths and platform dependencies. CMake reuses an existing `nlohmann_json::nlohmann_json` target, finds an installed package, or fetches JSON 3.11.3. See [build and integration](docs/BUILD.md) for installed packages, offline use and manual header copying.
+The target supplies C++20, include paths and platform dependencies. CMake reuses an existing `nlohmann_json::nlohmann_json` target, finds an installed package, or fetches JSON 3.12.0. See [build and integration](docs/BUILD.md) for installed packages, offline use and manual header copying.
 
 ### 2. Read and write configuration
 
@@ -47,7 +47,10 @@ int main()
     });
     store.save();
     std::cout << store.get<int>("/server/port") << '\n';
-    return store.get_or<int>("/absent", 80) == 80 ? 0 : 1;
+    const auto fallback  = store.get<int>("/absent", 80);
+    const auto generated = store.get<int>("/absent", [] { return 80; });
+    const auto optional  = store.find<int>("/absent");
+    return fallback == 80 && generated == 80 && !optional ? 0 : 1;
 }
 ```
 <!-- /snippet -->
@@ -67,7 +70,9 @@ Keys use **JSON Pointer** syntax:
 | `/a~0b` | Property named `a~b` |
 | `/` | Property with an empty name |
 
-Use `snapshot()` to read the root object and `update(fn)` to edit the writable root in one batch. `get<T>` reports missing values and type errors; `get_or<T>` uses its fallback **only when the key is absent**.
+Use `snapshot()` to read the root object and `update(fn)` to edit the writable root in one batch. `get<T>(key)` reports missing values and type errors. Supply a value or a zero-argument factory as the second argument to fall back **only when the key is absent**. Factories run synchronously, at most once and outside internal locks; their results are not saved.
+
+Use `find<T>(key)` for an optional result: only absence returns `nullopt`; invalid types still throw. Read owning values such as `std::string`. Scalar numeric reads reject overflow and fractional-to-integer truncation, and boolean fallbacks must be bool. `erase(key)` returns whether a writable value was removed; a missing writable key leaves storage, revision and dirty state unchanged.
 
 Reads combine sources in increasing priority:
 

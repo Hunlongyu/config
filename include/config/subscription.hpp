@@ -17,6 +17,7 @@ struct Change
 };
 namespace detail
 {
+class Observers;
 struct Slot
 {
     std::atomic<bool> active{true};
@@ -26,12 +27,13 @@ struct Slot
 class Subscription
 {
     std::shared_ptr<detail::Slot> slot_;
-
-  public:
-    Subscription() = default;
+    friend class detail::Observers;
     explicit Subscription(std::shared_ptr<detail::Slot> slot) : slot_(std::move(slot))
     {
     }
+
+  public:
+    Subscription()                                = default;
     Subscription(const Subscription &)            = delete;
     Subscription &operator=(const Subscription &) = delete;
     Subscription(Subscription &&) noexcept        = default;
@@ -53,7 +55,7 @@ class Subscription
         if (slot_)
             slot_->active = false;
     }
-    bool connected() const noexcept
+    [[nodiscard]] bool connected() const noexcept
     {
         return slot_ && slot_->active.load();
     }

@@ -1,5 +1,7 @@
 #include "test_support.hpp"
+#include <type_traits>
 using namespace config_test;
+static_assert(!std::is_constructible_v<config::Subscription, std::shared_ptr<config::detail::Slot>>);
 TEST(Subscriptions, AllMutationEntrypointsEmitBatchEvents)
 {
     TempDirectory dir;

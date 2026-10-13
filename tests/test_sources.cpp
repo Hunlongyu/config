@@ -6,13 +6,24 @@ TEST(Sources, AllReadMethodsUseTheEffectiveView)
     TempDirectory dir;
     config::Store store(dir.file(), {.save = config::SaveMode::manual, .defaults = {{"port", 8080}}});
     EXPECT_EQ(store.get<int>("/port"), 8080);
-    EXPECT_EQ(store.get_or<int>("/port", 3000), 8080);
+    EXPECT_EQ(store.get<int>("/port", 3000), 8080);
+    EXPECT_EQ(store.get<int>("/port",
+                             [&]() -> int {
+                                 if (store.contains("/port"))
+                                     throw std::logic_error("Default already supplies the value");
+                                 return 3000;
+                             }),
+              8080);
     EXPECT_TRUE(store.contains("/port"));
+    EXPECT_EQ(store.find<int>("/port"), std::optional<int>{8080});
     EXPECT_EQ(store.snapshot().at("port"), 8080);
     EXPECT_TRUE(store.snapshot(config::View::writable).empty());
     store.set("/port", 9000);
-    store.erase("/port");
+    EXPECT_TRUE(store.erase("/port"));
     EXPECT_EQ(store.get<int>("/port"), 8080);
+    const auto revision = store.revision();
+    EXPECT_FALSE(store.erase("/port"));
+    EXPECT_EQ(store.revision(), revision);
     store.update([](json &data) { data.clear(); });
     EXPECT_EQ(store.get<int>("/port"), 8080);
 }
@@ -29,6 +40,10 @@ TEST(Sources, LayerPrecedenceAndEnvironmentAreNotWrittenBack)
     EXPECT_EQ(store.get<int>("/server/port"), 9090);
     EXPECT_EQ(store.get<std::string>("/server/host"), "layer");
     EXPECT_EQ(store.get<std::string>("/theme"), "file");
+    EXPECT_EQ(store.find<int>("/server/port"), std::optional<int>{9090});
+    EXPECT_EQ(store.find<std::string>("/server/host"), std::optional<std::string>{"layer"});
+    EXPECT_EQ(store.find<std::string>("/theme"), std::optional<std::string>{"file"});
+    EXPECT_EQ(store.find<bool>("/defaultOnly"), std::optional<bool>{true});
     store.set("/theme", "dark");
     const auto persisted = json::parse(read(dir.file())).at("values");
     EXPECT_EQ(persisted["server"]["port"], 81);

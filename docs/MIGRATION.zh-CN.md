@@ -1,18 +1,44 @@
-# 从 0.1 迁移到 0.2
+# 迁移到 0.2.2
 
 [English](MIGRATION.md) · [API](API.zh-CN.md)
 
+## 从 0.2.0 / 0.2.1 迁移
+
+| 原调用 | 0.2.2 |
+|---|---|
+| `get<T>(pointer)` | 严格读取，要求拥有数据的返回类型，标量数值使用受检转换。 |
+| `get_or<T>(pointer, fallback)` | 改为 `get<T>(pointer, fallback)`，不提供兼容别名。 |
+| `get_or(pointer, fallback)` | 改为 `get<T>(pointer, fallback)`，显式指定返回类型。 |
+| 调用方提前计算回退值 | 使用 `get<T>(pointer, factory)`，仅在缺失时计算。 |
+| 先 `contains(pointer)` 再 `get<T>(pointer)` | 使用 `find<T>(pointer)`，从一份快照返回 optional。 |
+| `get<std::string_view>` / 裸指针结果 | 改为 `std::string` 等拥有数据的类型；直接返回借用类型会被拒绝。 |
+| 隐式数值截断或回绕 | 修正配置，或在应用中读取 JSON 快照后按明确规则转换。 |
+| bool 的整数或指针回退 | 使用 bool，或返回 bool 的无参生成函数。 |
+| `void erase(pointer)` | 返回是否删除可写值的 bool；false 时不校验、写入、改变 revision/dirty 或发送事件。 |
+| 从错误文本解析键名 | 使用 `Error::key()` 读取具体键错误的上下文。 |
+| `std::string version()` | 返回 `constexpr std::string_view` 且为 noexcept；需要副本时使用 `std::string(config::version())`。 |
+
+生成函数无参数，返回值可隐式转换为 `T`；bool 目标要求 bool，数值目标要求非 bool 的算术值。数值回退和生成结果接受与标量读取相同的范围及小数转整数检查。生成函数同步执行，至多一次，在锁外调用，不保存或重试。生成函数自身抛出的异常原样传播。已有 null、类型错误和非法路径均不触发生成函数，回退结果不会写回配置。
+
+`find<T>` 仅在缺失时返回 nullopt；null 和非法值仍按正常规则转换。读取和查询方法标记为 nodiscard，有意丢弃结果时显式转换为 `(void)`。容器元素和自定义反序列化器须拥有返回的数据，并负责其成员的转换策略。
+
+`update(fn)` 现在直接接收可调用对象，支持只能移动的捕获；普通回调仍遵循每次调用只执行一次的事务语义。`snapshot` 对非法 View 报错，不再静默返回可写层。活动 Subscription 句柄通过 `Store::subscribe` 创建，从内部槽位构造句柄的入口不再公开。
+
+文件格式仍为 `config/v1`，0.2 文件无需转换。自动获取的 JSON 依赖升级为 3.12.0。
+
+## 从 0.1 迁移
+
 本次主动移除重复和隐式 API，不提供保留隐藏全局状态的兼容包装。
 
-| 0.1 | 0.2 |
+| 0.1 | 0.2.2 |
 |---|---|
 | ConfigStore 及位置策略参数 | Store(file, StoreOptions) |
 | 全局 get/set/default store/get_store/release_store | 显式持有并向调用方共享 Store |
 | Path::Relative / Absolute | std::filesystem::path |
 | Path::AppData | user_config_directory(application) / filename |
 | SaveStrategy::Auto / Manual | 不可变选项中的 SaveMode::automatic / manual |
-| MissingKeyPolicy / set_missing_key_policy | get 严格读取，get_or 显式回退 |
-| get(key, fallback) | get_or<T>(pointer, fallback) |
+| MissingKeyPolicy / set_missing_key_policy | get<T>(pointer) 严格读取，get<T>(pointer, fallback) 显式回退 |
+| get(key, fallback) | get<T>(pointer, fallback) |
 | 普通键、空根键 | /key；根使用 snapshot/update |
 | remove / clear / set_root | erase / update(fn) |
 | get_root / sub / dump | snapshot / get<json> / snapshot().dump() |

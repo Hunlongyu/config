@@ -14,17 +14,17 @@ namespace config::detail
 using json      = nlohmann::json;
 using Encodings = std::map<std::string, Encoding>;
 
-inline json::json_pointer pointer(std::string_view key)
+inline json::json_pointer pointer(std::string_view key, const std::filesystem::path &file = {})
 {
     if (key.empty() || key.front() != '/')
-        throw Error(ErrorCode::path, "Keys must be nonempty JSON Pointers beginning with '/'");
+        throw Error(ErrorCode::path, "Keys must be nonempty JSON Pointers beginning with '/'", file, std::string(key));
     try
     {
         return json::json_pointer(std::string(key));
     }
     catch (const json::exception &e)
     {
-        throw Error(ErrorCode::path, e.what());
+        throw Error(ErrorCode::path, e.what(), file, std::string(key));
     }
 }
 
@@ -58,10 +58,10 @@ inline void prune_encodings(Encodings &rules, const json &before, const json &af
     });
 }
 
-inline void erase_value(json &data, Encodings &rules, const json::json_pointer &p)
+inline bool erase_value(json &data, Encodings &rules, const json::json_pointer &p)
 {
     if (!data.contains(p))
-        return;
+        return false;
     auto &parent   = data.at(p.parent_pointer());
     const auto key = p.to_string();
     if (parent.is_array())
@@ -100,5 +100,6 @@ inline void erase_value(json &data, Encodings &rules, const json::json_pointer &
         parent.erase(p.back());
         std::erase_if(rules, [&](const auto &rule) { return subtree(rule.first, key); });
     }
+    return true;
 }
 } // namespace config::detail

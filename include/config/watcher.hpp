@@ -98,7 +98,7 @@ class Watcher
                 worker.join();
         }
     }
-    std::optional<Error> last_error() const
+    [[nodiscard]] std::optional<Error> last_error() const
     {
         std::lock_guard lock(control_->mutex);
         return control_->error;
