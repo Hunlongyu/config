@@ -12,7 +12,7 @@ ctest --test-dir build -C Debug --output-on-failure --parallel
 ```
 On Windows use a Visual Studio developer shell first. Local discovery supports Visual Studio preview through vswhere -prerelease. Windows presets windows-debug/windows-release include install rules and consumer tests.
 
-BUILD_TESTING and BUILD_CONFIG_EXAMPLES default on for standalone builds. BUILD_CONFIG_BENCHMARK defaults off and fetches Google Benchmark when enabled. CONFIG_SANITIZER enables MSVC ASan or Unix ASan/UBSan; use RelWithDebInfo for MSVC ASan. ENABLE_COVERAGE enables Unix coverage instrumentation. Python 3, when available, adds the documentation synchronization test; CI checks it explicitly.
+BUILD_TESTING and BUILD_CONFIG_EXAMPLES default on for standalone builds. BUILD_CONFIG_BENCHMARK defaults off and fetches Google Benchmark when enabled. CONFIG_SANITIZER enables MSVC ASan or Unix ASan/UBSan; use RelWithDebInfo for MSVC ASan. ENABLE_COVERAGE enables Unix coverage instrumentation; GCC uses atomic profile counters for concurrent tests. Python 3, when available, adds the documentation synchronization test; CI checks it explicitly.
 
 ## Parent projects and offline use
 

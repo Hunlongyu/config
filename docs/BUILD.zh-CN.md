@@ -12,7 +12,7 @@ ctest --test-dir build -C Debug --output-on-failure --parallel
 ```
 Windows 先进入 Visual Studio 开发者命令行；发现预览版使用 vswhere -prerelease。windows-debug/windows-release presets 包含安装规则和消费者测试。
 
-独立构建默认启用 BUILD_TESTING、BUILD_CONFIG_EXAMPLES。BUILD_CONFIG_BENCHMARK 默认关闭，启用后获取 Google Benchmark。CONFIG_SANITIZER 开启 MSVC ASan 或 Unix ASan/UBSan；MSVC ASan 使用 RelWithDebInfo。ENABLE_COVERAGE 开启 Unix 覆盖率插桩。检测到 Python 3 时加入文档同步测试，CI 另行明确运行该检查。
+独立构建默认启用 BUILD_TESTING、BUILD_CONFIG_EXAMPLES。BUILD_CONFIG_BENCHMARK 默认关闭，启用后获取 Google Benchmark。CONFIG_SANITIZER 开启 MSVC ASan 或 Unix ASan/UBSan；MSVC ASan 使用 RelWithDebInfo。ENABLE_COVERAGE 开启 Unix 覆盖率插桩；GCC 使用原子计数，避免并发测试损坏统计数据。检测到 Python 3 时加入文档同步测试，CI 另行明确运行该检查。
 
 ## 宿主项目与离线构建
 
