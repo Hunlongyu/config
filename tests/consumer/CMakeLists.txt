@@ -30,7 +30,7 @@ if(MODE STREQUAL "manual")
 else()
   target_link_libraries(consumer PRIVATE config::config)
 endif()
-if(MSVC)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   # 显式覆盖中文代码页，避免测试的 UTF-8 选项掩盖公共头的编码问题。
   target_compile_options(consumer PRIVATE /source-charset:.936)
 endif()
