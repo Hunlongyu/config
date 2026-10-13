@@ -1,41 +1,19 @@
-# Check for OpenCppCoverage
+param([string]$BuildDirectory = "build/windows-debug")
+$ErrorActionPreference = "Stop"
 if (-not (Get-Command OpenCppCoverage -ErrorAction SilentlyContinue)) {
-    Write-Host "错误: 未找到 OpenCppCoverage 工具。" -ForegroundColor Red
-    Write-Host "请先安装 OpenCppCoverage: https://github.com/OpenCppCoverage/OpenCppCoverage/releases"
-    Write-Host "安装后请确保将其添加到系统 PATH 环境变量中，然后重新运行此脚本。"
-    exit 1
+    throw "请安装 OpenCppCoverage，并从初始化 MSVC 的终端运行。"
 }
-
-# Ensure build directory exists and is configured
-if (-not (Test-Path "build")) {
-    Write-Host "正在配置项目..."
-    cmake -B build
+$projectRoot = Split-Path $PSScriptRoot -Parent
+$buildPath = [IO.Path]::GetFullPath((Join-Path $projectRoot $BuildDirectory))
+if (-not (Test-Path -LiteralPath (Join-Path $buildPath "CMakeCache.txt"))) {
+    throw "请先按 docs/BUILD.zh-CN.md 配置构建目录。"
 }
-
-# Build the project
-Write-Host "正在编译项目..."
-cmake --build build --config Debug
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "编译失败。" -ForegroundColor Red
-    exit 1
-}
-
-# Run Coverage
-Write-Host "正在运行覆盖率测试..."
-$projectRoot = Get-Location
-cd build
-
-# --sources: Only show coverage for files in the project root
-# --excluded_sources: Exclude tests, build, and external deps
-# --cover_children: Track processes spawned by CTest
-OpenCppCoverage --sources "$projectRoot" `
-                --excluded_sources "$projectRoot\tests" `
-                --excluded_sources "$projectRoot\build" `
-                --excluded_sources "googletest" `
-                --cover_children `
-                -- ctest -C Debug
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "覆盖率报告已生成，通常位于 build/CoverageReport/index.html" -ForegroundColor Green
+cmake --build $buildPath --config Debug
+if ($LASTEXITCODE -ne 0) { throw "构建失败。" }
+Push-Location -LiteralPath $buildPath
+try {
+    OpenCppCoverage --sources "$projectRoot\include\config" --excluded_sources "$buildPath" --cover_children -- ctest -C Debug --output-on-failure
+    if ($LASTEXITCODE -ne 0) { throw "测试或覆盖率采集失败。" }
+} finally {
+    Pop-Location
 }

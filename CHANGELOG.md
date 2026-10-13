@@ -4,7 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.2.0] - Unreleased
+
+### Breaking changes
+
+- Replace ConfigStore and global wrappers with an explicitly owned Store, immutable StoreOptions and JSON Pointer keys.
+- Replace duplicate retrieval, path and subscription APIs with get/get_or, snapshot/update, path and Subscription.
+- Use structured Error codes; save throws on failure, and concurrent candidate conflicts are explicit.
+- Write a versioned config/v1 envelope. Plain objects import directly; old encoded files require explicit legacy_encoding import.
+
+### Architecture and fixes
+
+- Separate state transactions, codec, storage backend, subscriptions, platform paths and optional Watcher.
+- Validate every candidate, persist automatic mutations before publication, and preserve valid state after failed reloads.
+- Keep defaults, file layers, writable values and environment separate; save only writable data.
+- Use one decoder for construction, reload, layers and file merges; preserve business metadata-like fields.
+- Enforce one active file owner across equivalent paths without retaining old instances.
+- Dispatch ordered batch events outside locks; subscriptions may outlive Store, and watcher failures retry without new timestamps.
+- Reuse parent JSON targets, prevent Windows macro leakage, install the license and fix localized MSVC dependency tracking.
+
+### Verification and documentation
+
+- Consolidate duplicate tests into behavior suites with isolated temporary directories.
+- Add deterministic transaction/save regressions and a mutation guard that must reject removal of the save lock.
+- Test independent headers, multiple translation units, installed packages, parent projects, manual integration and compiled examples.
+- Synchronize English/Chinese API, architecture, build and migration documents; validate snippets against their source examples.
+- Run platform and sanitizer jobs in CI; publish release assets only after all validation jobs succeed.
+
+## 0.1 development history
+
+### Fixed (0.1.4)
+
+- Listener dispatch snapshots callbacks safely during reentrant or concurrent registration and disconnection
+- Registry removal keeps existing references valid; `get_store_handle()` adds shared ownership for stores requiring earlier reclamation
+- Concurrent saves take snapshots in persistence order; serialization and file replacement failures preserve the previous configuration
+- Windows environment enumeration compiles with `UNICODE`; POSIX enumeration resolves the global `environ` symbol, and environment tests use platform-specific setters
+- Reload validates unpublished candidates and detects concurrent changes instead of exposing rejected data or rolling back newer writes
+- Reload rebuilds encoding metadata; equivalent JSON Pointer keys share one rule, and removing or replacing subtrees clears affected rules
+- Reverse encoding preserves UTF-8 characters
+- Removal, root replacement, and clearing notify listeners; array removal shifts remaining elements and their encoding rules
+- Recursive key enumeration escapes `/` and `~` in JSON Pointer segments
+- Installing the fetched JSON dependency includes its headers and CMake package for standalone consumers
+- Save strategy and output format reads synchronize with their setters
+
+### Tests
+
+- Added regression coverage for lifetime, callback reentrancy, concurrency, validation, failed writes, encoding, paths, Unicode builds, and isolated installation consumption
 
 ### Added
 

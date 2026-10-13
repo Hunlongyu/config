@@ -1,230 +1,115 @@
 # Config
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![CMake 3.28+](https://img.shields.io/badge/CMake-3.28%2B-green.svg)](https://cmake.org/)
-[![Header-only](https://img.shields.io/badge/header--only-yes-brightgreen.svg)]()
+[中文](README.zh-CN.md) · [API reference](docs/API.md) · [Build & install](docs/BUILD.md) · [Changelog](CHANGELOG.md)
 
-A modern, header-only C++20 configuration management library backed by [nlohmann/json](https://github.com/nlohmann/json). It provides a zero-boilerplate global API alongside a full-featured `ConfigStore` class — both thread-safe, both persistent.
+A header-only JSON configuration library for C++20 applications. Own a `config::Store`, choose a file, and read or update typed values with nlohmann/json.
 
-[中文文档](docs/README_CN.md) | [API Reference](docs/API_Reference.md) | [Build & Install](docs/Build_and_Install.md)
+- **Typed access** — read values and custom structs, with explicit fallbacks for missing keys.
+- **Controlled persistence** — automatic or manual saving, validation, batch updates and atomic file replacement.
+- **Layered configuration** — combine defaults, configuration files and environment overrides.
+- **Change tracking** — scoped subscriptions and an optional file watcher.
 
----
+> This README describes **0.2.0 (unreleased)**, which changes the public API. For existing applications, follow the [0.1 → 0.2 migration guide](docs/MIGRATION.md).
 
-## Features
+## Quick start
 
-| Category | Capability |
-|---|---|
-| **API style** | Global `get`/`set` for quick use; `ConfigStore` for multiple isolated stores |
-| **Paths** | JSON Pointer-style `/` separated keys for deep nested access |
-| **Persistence** | Auto-save on every `set`, or Manual save via `save()` |
-| **Path resolution** | Relative (cwd), Absolute, or AppData (platform-specific user config dir) |
-| **Obfuscation** | Per-key encoding: Base64, Hex, ROT13, Reverse, Combined |
-| **File watcher** | Background thread polls the config file and calls `reload()` on change |
-| **Schema validation** | Register a validator callback; it can throw to reject invalid config |
-| **Env var binding** | Prefix-based env override (`StoreOptions::env_prefix`) and explicit `bind_env()` |
-| **Layered config** | `load_layered()` merges an ordered list of files (defaults → user → override) |
-| **Wildcard listeners** | `on_any_change()` fires on every mutation; `connect()`/`on_change()` target one key |
-| **Subtree snapshots** | `sub(prefix)` returns a point-in-time copy of any sub-tree |
-| **Default value layer** | `set_default()` registers in-memory fallbacks that survive `reload()` and `clear()` |
-| **Struct serialization** | Standard nlohmann/json `NLOHMANN_DEFINE_TYPE_*` macros work out of the box |
-| **Thread safety** | `std::shared_mutex` guards all reads and writes |
-| **RAII listeners** | `Connection` handle auto-disconnects on destruction |
+### 1. Add the library
 
----
-
-## Integration
-
-### CMake FetchContent (recommended)
+Requires a **C++20 compiler** and **nlohmann/json**; CMake integration requires **CMake 3.28+**. Place this checkout under `third_party/config`, then link `config::config`:
 
 ```cmake
-include(FetchContent)
+cmake_minimum_required(VERSION 3.28)
+project(my_app LANGUAGES CXX)
 
-FetchContent_Declare(
-  config
-  GIT_REPOSITORY https://github.com/Hunlongyu/config.git
-  GIT_TAG        main  # pin to a release tag in production
-  GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(config)
-
-target_link_libraries(your_target PRIVATE config::config)
+add_subdirectory(third_party/config)
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE config::config)
 ```
 
-nlohmann/json is fetched automatically — no separate install step required.
+The target supplies C++20, include paths and platform dependencies. CMake reuses an existing `nlohmann_json::nlohmann_json` target, finds an installed package, or fetches JSON 3.11.3. See [build and integration](docs/BUILD.md) for installed packages, offline use and manual header copying.
 
-### Manual copy
+### 2. Read and write configuration
 
-1. Copy the `include/config` directory into your project's include path.
-2. Make sure nlohmann/json is available on the include path.
-3. Add `#include <config/config.hpp>` to your source files.
+Save this as `main.cpp`:
 
----
-
-## Quick Start
-
-### Global API
-
-The global API is ready to use with no setup. It writes to `config.json` in the current working directory.
-
+<!-- snippet:examples/basic.cpp:quick-start -->
 ```cpp
 #include <config/config.hpp>
 #include <iostream>
 
 int main()
 {
-    // Write values — auto-saved immediately
-    config::set("server/host", std::string("127.0.0.1"));
-    config::set("server/port", 8080);
-    config::set("app/debug",   true);
-
-    // Read values with a fallback default
-    auto host  = config::get<std::string>("server/host", "localhost");
-    auto port  = config::get<int>("server/port", 80);
-    auto debug = config::get<bool>("app/debug", false);
-
-    std::cout << host << ":" << port << "  debug=" << debug << "\n";
+    config::Store store("settings.json", {.save = config::SaveMode::manual});
+    store.set("/server/port", 8080);
+    store.update([](nlohmann::json &values) {
+        values["server"]["host"] = "localhost";
+        values["theme"]          = "dark";
+    });
+    store.save();
+    std::cout << store.get<int>("/server/port") << '\n';
+    return store.get_or<int>("/absent", 80) == 80 ? 0 : 1;
 }
 ```
+<!-- /snippet -->
 
-### ConfigStore API
+This example writes `settings.json` in the current working directory and prints `8080`. A missing file starts with an empty configuration and is created on save.
 
-Use `ConfigStore` when you need multiple stores, fine-grained control, or any of the advanced features.
+The default is **automatic saving**: each successful mutation is persisted before becoming visible. The example selects `SaveMode::manual` to collect edits in memory and write them with `save()`.
 
-```cpp
-#include <config/config.hpp>
-#include <iostream>
+## Configuration model
 
-int main()
-{
-    // Store in the platform user-config directory, manual save
-    config::ConfigStore store("myapp/settings.json", {
-        .path_type  = config::Path::AppData,
-        .save       = config::SaveStrategy::Manual,
-        .env_prefix = "MYAPP_",   // MYAPP_SERVER_PORT overrides server/port
-    });
+Keys use **JSON Pointer** syntax:
 
-    // Defaults layer — survives reload() and clear()
-    store.set_default("server/port", 8080);
-    store.set_default("app/theme",   std::string("dark"));
-
-    // Schema validation — throw to reject bad config
-    store.set_validator([](const nlohmann::json &cfg) {
-        if (!cfg.contains("server"))
-            throw std::runtime_error("Missing required section: server");
-    });
-
-    // Typed change listener with RAII auto-disconnect
-    auto conn = store.on_change<int>("server/port", [](int port) {
-        std::cout << "Port changed to " << port << "\n";
-    });
-
-    // File watcher — calls reload() automatically when the file changes on disk
-    store.start_watch(std::chrono::seconds{2});
-
-    store.set("server/port", 9090);
-    store.save();                        // persist (Manual strategy)
-
-    // Subtree snapshot
-    auto server_cfg = store.sub("server");
-    std::cout << server_cfg.dump(4) << "\n";
-}
-```
-
----
-
-## Advanced Usage
-
-### Layered configuration
-
-Load files in priority order (later files win):
-
-```cpp
-store.load_layered({
-    "config/defaults.json",
-    "config/production.json",
-    "config/local.json",     // highest priority; may not exist — silently skipped
-});
-```
-
-### Obfuscation
-
-Encode sensitive values at rest with a per-key strategy:
-
-```cpp
-store.set("auth/token", std::string("s3cr3t"), config::Encoding::Base64);
-// Stored on disk as Base64; decoded transparently by get()
-auto token = store.get<std::string>("auth/token");
-```
-
-### Struct serialization
-
-Any type that nlohmann/json can serialize works directly:
-
-```cpp
-struct ServerConfig {
-    std::string host;
-    int port;
-    NLOHMANN_DEFINE_TYPE_INTRUSIVE(ServerConfig, host, port)
-};
-
-ServerConfig cfg{ "localhost", 8080 };
-store.set("server", cfg);
-auto loaded = store.get<ServerConfig>("server");
-```
-
-### Wildcard listener
-
-```cpp
-auto conn = store.on_any_change([](const nlohmann::json &val) {
-    std::cout << "Something changed: " << val.dump() << "\n";
-});
-```
-
-### Explicit env binding
-
-```cpp
-store.bind_env("database/url", "DATABASE_URL");
-store.reload();   // picks up the env var now
-```
-
----
-
-## API Summary
-
-| Method | Description |
+| Pointer | Value addressed |
 |---|---|
-| `get<T>(key, default)` | Read a value with a fallback |
-| `set(key, value)` | Write a value (obfuscation optional) |
-| `remove(key)` | Delete a key |
-| `contains(key)` | Check key existence |
-| `get_or_set(key, default)` | Atomic read-or-initialize |
-| `save()` / `reload()` / `clear()` | Persistence and lifecycle |
-| `merge(json)` / `merge_file(path)` | Deep-merge an overlay |
-| `load_layered(paths)` | Priority-ordered file stacking |
-| `sub(prefix)` | Point-in-time subtree copy |
-| `keys(prefix)` / `all_keys(prefix)` | Enumerate keys |
-| `get_all<T>(prefix)` | All child values as a typed map |
-| `connect(key, cb)` / `on_change<T>(key, cb)` | Scoped change listeners |
-| `on_any_change(cb)` | Wildcard listener |
-| `start_watch()` / `stop_watch()` | Background file watcher |
-| `set_validator(fn)` | Schema validation hook |
-| `set_default(key, value)` | In-memory default value layer |
-| `bind_env(key, var)` | Explicit env variable binding |
-| `dump(format)` | Serialize store to string |
+| `/server/port` | `port` inside `server` |
+| `/a~1b` | Property named `a/b` |
+| `/a~0b` | Property named `a~b` |
+| `/` | Property with an empty name |
 
-Full parameter details and overloads are in [docs/API_Reference.md](docs/API_Reference.md).
+Use `snapshot()` to read the root object and `update(fn)` to edit the writable root in one batch. `get<T>` reports missing values and type errors; `get_or<T>` uses its fallback **only when the key is absent**.
 
----
+Reads combine sources in increasing priority:
 
-## Requirements
+```text
+defaults → ordered file layers → writable file → environment
+```
 
-- **C++20** compiler (GCC 12+, Clang 15+, MSVC 19.34+)
-- **CMake 3.28+** (when using the CMake integration)
-- **nlohmann/json** — fetched automatically via FetchContent when using CMake; otherwise add it manually
+Only the writable layer is saved. Environment values are sampled at construction and on `reload()`. Existing plain JSON objects can be imported; saves use the versioned [`config/v1` envelope](docs/API.md#errors-and-persistence). Encoded 0.1 files need [explicit import](docs/MIGRATION.md).
 
----
+## Guarantees and usage notes
+
+- **Failure handling:** automatic mutations validate and persist before committing state or notifying subscribers. Failed reloads retain the last valid state. Configuration errors include a structured `config::ErrorCode`.
+- **Concurrent updates:** a conflicting commit throws `ErrorCode::conflict`; callers decide whether to retry. An `update()` callback runs once per call.
+- **File ownership:** share one Store per file within a linked program image. Coordination between processes requires application-level ownership.
+- **Subscriptions and watching:** keep the returned `Subscription` to receive changes. Include `<config/watcher.hpp>` and hold a `Watcher` to reload external file edits; it preserves unsaved manual edits.
+- **Encoding:** Base64, Hex, ROT13, reverse and combined encodings are reversible representations, **not encryption**.
+
+See the [API reference](docs/API.md) for error, callback and lifetime contracts, and [architecture and testing](docs/ARCHITECTURE.md) for implementation boundaries and verification scope.
+
+## Examples
+
+| Example | Topics |
+|---|---|
+| [Basic operations](examples/basic.cpp) | Typed reads, fallbacks, batch updates and manual saving |
+| [Configuration sources](examples/sources.cpp) | Defaults, file layers, environment variables and encoding |
+| [Observing changes](examples/observe.cpp) | Validation, subscriptions and file watching |
+| [Struct serialization](examples/serialization.cpp) | Reading and writing custom C++ types |
+
+All examples are built and run by the test suite. The quick-start snippet above is checked against its compiled source.
+
+## Build and test
+
+From the repository root, run:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --config Debug --parallel
+ctest --test-dir build -C Debug --output-on-failure --parallel
+```
+
+On Windows, use a Visual Studio developer shell. See [build options](docs/BUILD.md) for sanitizers and coverage, or [contributing](CONTRIBUTING.md) for the development workflow.
 
 ## License
 
-MIT License
+[MIT](LICENSE.txt).

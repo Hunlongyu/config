@@ -1,10 +1,9 @@
 name: C++ CI
-
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [main, master]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [main, master]
 
 jobs:
   build:
@@ -13,43 +12,38 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        build_type: [Release]
-
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python scripts/check_docs.py
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_CONFIG_BENCHMARK=OFF
+      - run: cmake --build build --config Debug --parallel 2
+      - run: ctest --test-dir build -C Debug --output-on-failure --parallel 2
 
-    - name: Configure CMake
-      run: |
-        if [ "${{ runner.os }}" == "Linux" ]; then
-          rm -rf build
-          sudo apt-get update
-          sudo apt-get install -y clang-tidy
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON -DBUILD_CLANG_TIDY=ON
-        else
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=${{matrix.build_type}}
-        fi
-      shell: bash
+  sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCONFIG_SANITIZER=ON -DBUILD_CONFIG_BENCHMARK=OFF
+      - run: cmake --build build --parallel 2
+      - run: ctest --test-dir build --output-on-failure --parallel 2
 
-    - name: Build
-      run: cmake --build build --config ${{matrix.build_type}}
-
-    - name: Test
-      working-directory: build
-      run: ctest -C ${{matrix.build_type}} --output-on-failure
-
-    - name: Generate Coverage Report (Linux only)
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y lcov
-        lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch,gcov
-        lcov --remove coverage.info '/usr/*' '*/tests/*' '*/examples/*' '*/nlohmann/*' --output-file coverage.info --ignore-errors mismatch,unused
-        lcov --list coverage.info --ignore-errors mismatch,unused
-        genhtml coverage.info --output-directory coverage_report --ignore-errors mismatch
-
-    - name: Upload Coverage Artifact
-      if: runner.os == 'Linux'
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-report
-        path: coverage_report/
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y lcov
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON -DBUILD_CONFIG_EXAMPLES=OFF
+      - run: cmake --build build --parallel 2
+      - run: ctest --test-dir build --output-on-failure --parallel 2
+      - run: |
+          lcov --capture --directory build --output-file coverage.info --ignore-errors mismatch,gcov
+          lcov --extract coverage.info '*/include/config/*' --output-file coverage.info --ignore-errors mismatch,unused
+          lcov --remove coverage.info '*/mutant/*' --output-file coverage.info --ignore-errors mismatch,unused
+          genhtml coverage.info --output-directory coverage_report --ignore-errors mismatch
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage_report/

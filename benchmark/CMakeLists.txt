@@ -12,7 +12,10 @@ set(BENCHMARK_ENABLE_INSTALL
     OFF
     CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googlebenchmark)
+config_enable_sanitizer(benchmark)
+config_enable_sanitizer(benchmark_main)
 
 add_executable(config_benchmark benchmark.cpp)
 target_link_libraries(config_benchmark PRIVATE config::config
                                                benchmark::benchmark)
+config_development_target(config_benchmark)

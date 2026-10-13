@@ -1,50 +1,9 @@
-# Contributing to Config Library
+# Contributing
 
-Thank you for your interest in contributing to the Config Library! We welcome contributions from everyone.
+Use the C++20 style in .clang-format. Add behavior-focused tests for changes, and use unique temporary directories for file tests.
 
-## How to Contribute
+Build and run tests as described in [BUILD](docs/BUILD.md). The regression suites, consumer tests, compiled examples and save-lock mutation guard must pass. Run `python scripts/check_docs.py` after documentation changes; `--update` refreshes marked snippets from examples.
 
-### 1. Reporting Bugs
-If you find a bug, please open an issue on GitHub.
-*   **Check existing issues** to see if the bug has already been reported.
-*   **Provide a reproduction**: A minimal code example that demonstrates the issue is extremely helpful.
-*   **Describe environment**: OS, Compiler version, CMake version, etc.
+Keep [English](README.md) and [Chinese](README.zh-CN.md) documentation aligned. API changes require updates to both API references, migration notes and CHANGELOG.md. Do not claim cross-platform runtime verification from a Windows-only run.
 
-### 2. Suggesting Enhancements
-We welcome ideas for new features or improvements.
-*   Open an issue with the tag `enhancement`.
-*   Clearly describe the feature and the problem it solves.
-
-### 3. Pull Requests
-1.  **Fork the repository** and create a new branch for your feature or fix.
-2.  **Coding Style**:
-    *   This project follows standard C++20 practices.
-    *   We use `clang-format` to enforce code style. Please run `pre-commit run --all-files` before submitting.
-    *   Ensure your code passes `clang-tidy` checks.
-3.  **Tests**:
-    *   Add unit tests for any new functionality.
-    *   Ensure all existing tests pass (`ctest`).
-4.  **Documentation**:
-    *   Update `API_Reference.md` if you change public APIs.
-    *   Add comments to your code where necessary.
-5.  **Submit PR**:
-    *   Target the `main` branch.
-    *   Describe your changes in detail.
-    *   Link to any related issues.
-
-## Development Setup
-
-1.  **Clone repo**: `git clone https://github.com/Hunlongyu/config.git`
-2.  **Install dependencies**:
-    *   C++20 Compiler
-    *   CMake 3.28+
-    *   Python (for pre-commit)
-3.  **Setup hooks**: `pre-commit install`
-4.  **Build**:
-    ```bash
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-    cmake --build build
-    ```
-
-## License
-By contributing, you agree that your contributions will be licensed under its MIT License.
+Commit messages use Chinese Conventional Commits. Bug reports should include a minimal reproduction, operating system, compiler and the relevant Error code. Contributions use the [MIT license](LICENSE.txt).
