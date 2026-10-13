@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [0.2.0] - Unreleased
+## [0.2.0] - 2026-10-13
 
 ### Breaking changes
 
@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Test independent headers, multiple translation units, installed packages, parent projects, manual integration and compiled examples.
 - Synchronize English/Chinese API, architecture, build and migration documents; validate snippets against their source examples.
 - Run platform and sanitizer jobs in CI; publish release assets only after all validation jobs succeed.
+- Use atomic GCC coverage counters so concurrent tests do not corrupt profiling data.
 
 ## 0.1 development history
 

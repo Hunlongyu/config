@@ -9,7 +9,7 @@ A header-only JSON configuration library for C++20 applications. Own a `config::
 - **Layered configuration** — combine defaults, configuration files and environment overrides.
 - **Change tracking** — scoped subscriptions and an optional file watcher.
 
-> This README describes **0.2.0 (unreleased)**, which changes the public API. For existing applications, follow the [0.1 → 0.2 migration guide](docs/MIGRATION.md).
+> [**0.2.0**](https://github.com/Hunlongyu/config/releases/tag/v0.2.0) changes the public API. For existing applications, follow the [0.1 → 0.2 migration guide](docs/MIGRATION.md).
 
 ## Quick start
 

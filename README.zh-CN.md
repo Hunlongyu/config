@@ -9,7 +9,7 @@
 - **分层配置**：合并默认值、配置文件和环境变量覆盖。
 - **变更追踪**：提供作用域订阅和可选的文件监视器。
 
-> 本文档对应 **0.2.0（尚未发布）**，包含不兼容的 API 调整。已有应用请参阅 [0.1 → 0.2 迁移指南](docs/MIGRATION.zh-CN.md)。
+> [**0.2.0**](https://github.com/Hunlongyu/config/releases/tag/v0.2.0) 包含不兼容的 API 调整。已有应用请参阅 [0.1 → 0.2 迁移指南](docs/MIGRATION.zh-CN.md)。
 
 ## 快速开始
 
