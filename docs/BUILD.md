@@ -38,4 +38,4 @@ Package compatibility is limited to the same minor version because 0.2 changes t
 
 Copy include/config and provide nlohmann/json headers. Enable C++20 and platform thread support (for example -pthread on toolchains that require it). On Windows, link Shell32.lib if using user_config_directory. config.hpp does not require the generated version header; copy generated version.h separately only if the application uses version().
 
-The consumer tests build the library as an installed package, as a parent subdirectory with an already supplied dependency, and by directly including its headers. Independent-header and multiple-translation-unit tests catch macro leakage and missing inline definitions.
+The consumer tests build the library as an installed package, as a parent subdirectory with an already supplied dependency, and by directly including its headers. MSVC consumers use source code page 936 to check that public headers work without requiring UTF-8 compiler flags. Independent-header and multiple-translation-unit tests catch macro leakage and missing inline definitions.

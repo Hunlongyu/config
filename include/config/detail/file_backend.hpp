@@ -38,7 +38,7 @@ inline bool same_file(const std::filesystem::path &a, const std::filesystem::pat
     return std::filesystem::equivalent(a, b, error) && !error;
 }
 
-// 仅记录活动所有者的弱引用，不持有 Store，也不永久缓存实例。
+// Track active owners weakly without retaining stores or caching expired instances.
 inline std::shared_ptr<const std::filesystem::path> claim_file(const std::filesystem::path &path)
 {
     static std::mutex mutex;
@@ -62,7 +62,7 @@ class FileBackend final : public Backend
         const auto status = std::filesystem::status(path, error);
         if (status.type() == std::filesystem::file_type::not_found)
         {
-            // Windows 也会把“父级是普通文件”报告为路径不存在。
+            // Windows also reports a missing path when a parent is a regular file.
             for (auto parent = path.parent_path(); !parent.empty();)
             {
                 std::error_code parent_error;

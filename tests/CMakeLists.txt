@@ -59,6 +59,7 @@ foreach(header IN LISTS public_headers)
 endforeach()
 add_executable(test_headers consumer_main.cpp consumer_peer.cpp ${header_units})
 target_link_libraries(test_headers PRIVATE config::config)
+target_compile_definitions(test_headers PRIVATE CONFIG_TEST_VERSION="${PROJECT_VERSION}")
 config_development_target(test_headers)
 add_test(NAME headers_and_multiple_translation_units COMMAND test_headers)
 

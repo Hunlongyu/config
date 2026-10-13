@@ -54,7 +54,7 @@ struct StoreOptions
     std::function<void(const nlohmann::json &)> validate;
     std::function<void(std::exception_ptr)> on_callback_error;
     std::shared_ptr<Backend> backend;
-    // 仅用于显式导入 0.1.x 的编码文件；普通用户字段默认不解释为元数据。
+    // Explicit import of encoded 0.1.x files; normal user fields are not metadata.
     bool legacy_encoding = false;
 };
 } // namespace config

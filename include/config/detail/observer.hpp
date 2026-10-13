@@ -84,7 +84,7 @@ class Observers
                             }
                     }
                 }
-            // 用户回调及其捕获对象的析构均不得在内部锁下运行。
+            // Run callbacks and destroy their captures outside internal locks.
             pending.slots.clear();
             lock.lock();
         }

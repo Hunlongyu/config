@@ -96,7 +96,7 @@ class Store
         const auto state = state_;
         state->mutate([&](detail::Document &document) { detail::erase_value(document.values, document.encodings, p); });
     }
-    // fn 操作可写层副本；并发冲突抛错，不重复执行用户函数。
+    // Edit a writable-layer copy once; concurrent conflicts throw without retrying fn.
     void update(const std::function<void(json &)> &fn)
     {
         const auto state = state_;

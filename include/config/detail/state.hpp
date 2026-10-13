@@ -175,7 +175,7 @@ class State
 
     void save()
     {
-        // 写锁覆盖快照读取与完整写入，旧 save 不能覆盖新状态。
+        // Lock snapshot acquisition through the write so stale saves cannot overwrite newer state.
         std::lock_guard writer_lock(writer_);
         const auto before = snapshot();
         auto candidate    = std::make_shared<Snapshot>(*before);

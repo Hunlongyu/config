@@ -7,7 +7,7 @@
 
 namespace config
 {
-// 实现必须允许并发读取；write 成功时完整替换，失败时保留旧内容并抛出 Error。
+// Allow concurrent reads. Writes replace complete files or throw Error and retain the old content.
 class Backend
 {
   public:

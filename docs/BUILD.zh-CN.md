@@ -38,4 +38,4 @@ target_link_libraries(app PRIVATE config::config)
 
 复制 include/config，提供 nlohmann/json 头文件，启用 C++20 和平台线程支持（需要的工具链使用 -pthread）。Windows 使用 user_config_directory 时链接 Shell32.lib。config.hpp 不依赖生成的版本头，仅调用 version() 时需要另行复制生成的 version.h。
 
-消费者测试覆盖安装包、已提供依赖的父项目 add_subdirectory、直接使用头文件三种方式；公共头独立编译和多翻译单元测试检查宏污染、遗漏 inline 等问题。
+消费者测试覆盖安装包、已提供依赖的父项目 add_subdirectory、直接使用头文件三种方式；MSVC 消费者显式使用源代码页 936，检查公共头无需 UTF-8 编译选项也能使用。公共头独立编译和多翻译单元测试检查宏污染、遗漏 inline 等问题。

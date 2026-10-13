@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(config VERSION 0.2.0 LANGUAGES CXX)
+project(config VERSION 0.2.1 LANGUAGES CXX)
 include(cmake/DetectMsvcIncludes.cmake)
 
 option(CONFIG_FETCH_JSON "Fetch nlohmann_json when no target or package is supplied" ON)
