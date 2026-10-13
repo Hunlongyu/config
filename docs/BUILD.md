@@ -27,7 +27,7 @@ CONFIG_INSTALL defaults on for a standalone build and off when embedded. An embe
 cmake -S . -B package -DBUILD_TESTING=OFF -DBUILD_CONFIG_EXAMPLES=OFF
 cmake --install package --prefix install
 ```
-The default fetched dependency is installed with the library; the prefix includes public/detail headers, generated version.h, CMake package files, JSON and share/licenses/config/LICENSE.txt. With an externally supplied JSON package, consumers must also be able to find that package.
+The default fetched dependency is installed with the library; the prefix includes public/detail headers, generated version.h, CMake package files, JSON, and both licenses under share/licenses/. With an externally supplied JSON package, consumers must also be able to find that package.
 ```cmake
 find_package(config 0.2 CONFIG REQUIRED)
 target_link_libraries(app PRIVATE config::config)

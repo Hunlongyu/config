@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Synchronize English/Chinese API, architecture, build and migration documents; validate snippets against their source examples.
 - Run platform and sanitizer jobs in CI; publish release assets only after all validation jobs succeed.
 - Use atomic GCC coverage counters so concurrent tests do not corrupt profiling data.
+- Include the bundled nlohmann/json license in installed packages and verify both licenses in consumer tests.
 
 ## 0.1 development history
 

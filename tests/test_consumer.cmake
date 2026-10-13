@@ -26,9 +26,11 @@ if(MODE STREQUAL "install")
     -DBUILD_TESTING=OFF -DBUILD_CONFIG_EXAMPLES=OFF -DBUILD_CONFIG_BENCHMARK=OFF
     -DCONFIG_FETCH_JSON=ON -DCMAKE_DISABLE_FIND_PACKAGE_nlohmann_json=TRUE ${dependency_args})
   run("${CMAKE_COMMAND}" --install "${work}/library" --prefix "${prefix}" --config "${CONFIG}")
-  if(NOT EXISTS "${prefix}/share/licenses/config/LICENSE.txt")
-    message(FATAL_ERROR "Installed package is missing LICENSE.txt")
-  endif()
+  foreach(license IN ITEMS config/LICENSE.txt nlohmann_json/LICENSE.MIT)
+    if(NOT EXISTS "${prefix}/share/licenses/${license}")
+      message(FATAL_ERROR "Installed package is missing ${license}")
+    endif()
+  endforeach()
 endif()
 run("${CMAKE_COMMAND}" -S "${SOURCE_DIR}/tests/consumer" -B "${work}/application" ${common}
   "-DMODE=${MODE}" "-DCONFIG_SOURCE_DIR=${SOURCE_DIR}"

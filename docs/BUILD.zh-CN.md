@@ -27,7 +27,7 @@ CONFIG_INSTALL 独立构建默认开启，嵌入宿主默认关闭。嵌入项�
 cmake -S . -B package -DBUILD_TESTING=OFF -DBUILD_CONFIG_EXAMPLES=OFF
 cmake --install package --prefix install
 ```
-默认获取的 JSON 随库安装。安装前缀包含公开和内部头、生成的 version.h、CMake 包文件、JSON 及 share/licenses/config/LICENSE.txt。外部提供 JSON 包时，消费方也需要能找到该包。
+默认获取的 JSON 随库安装。安装前缀包含公开和内部头、生成的 version.h、CMake 包文件、JSON，以及 share/licenses/ 下本库和 JSON 的许可证。外部提供 JSON 包时，消费方也需要能找到该包。
 ```cmake
 find_package(config 0.2 CONFIG REQUIRED)
 target_link_libraries(app PRIVATE config::config)

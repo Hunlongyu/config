@@ -10,6 +10,7 @@ option(BUILD_TESTING "Build tests" ${PROJECT_IS_TOP_LEVEL})
 option(ENABLE_COVERAGE "Instrument project tests for coverage" OFF)
 option(CONFIG_SANITIZER "Enable AddressSanitizer (and UBSan on Unix)" OFF)
 
+set(config_json_license "")
 if(NOT TARGET nlohmann_json::nlohmann_json)
   find_package(nlohmann_json CONFIG QUIET)
 endif()
@@ -20,6 +21,9 @@ if(NOT TARGET nlohmann_json::nlohmann_json AND CONFIG_FETCH_JSON)
     GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG v3.11.3)
   FetchContent_MakeAvailable(json)
+  if(JSON_Install)
+    set(config_json_license "${json_SOURCE_DIR}/LICENSE.MIT")
+  endif()
 endif()
 if(NOT TARGET nlohmann_json::nlohmann_json)
   message(FATAL_ERROR "Provide nlohmann_json::nlohmann_json or enable CONFIG_FETCH_JSON")
@@ -89,6 +93,10 @@ if(CONFIG_INSTALL)
     "${CMAKE_CURRENT_BINARY_DIR}/configConfigVersion.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/config")
   install(FILES LICENSE.txt DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/config")
+  if(config_json_license)
+    install(FILES "${config_json_license}"
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/nlohmann_json")
+  endif()
 endif()
 
 if(BUILD_TESTING)
